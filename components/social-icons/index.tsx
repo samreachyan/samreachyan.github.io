@@ -11,7 +11,7 @@ import {
   Instagram,
   Medium,
   Bluesky,
-  Telegram
+  Telegram,
 } from './icons'
 
 const components = {
@@ -27,7 +27,7 @@ const components = {
   instagram: Instagram,
   medium: Medium,
   bluesky: Bluesky,
-  telegram: Telegram
+  telegram: Telegram,
 }
 
 type SocialIconProps = {
