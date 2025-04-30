@@ -1,0 +1,508 @@
+---
+title: '11 - Spring Native & Cloud-Native Development '
+date: '2025-05-02'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'This comprehensive tutorial covers building cloud-native applications with Spring Native, including AOT compilation, Docker containerization, Kubernetes deployment, cloud configuration, and observability.'
+authors: ['default']
+---
+
+## Table of Contents
+
+1. [Project Setup](#project-setup)
+2. [Spring Native Compilation](#spring-native-compilation)
+3. [Containerization with Docker](#containerization-with-docker)
+4. [Kubernetes Deployment](#kubernetes-deployment)
+5. [Cloud Configuration](#cloud-configuration)
+6. [Observability](#observability)
+7. [Complete Sample Application](#complete-sample-application)
+
+## Prerequisites
+
+- JDK 17 or later
+- Maven 3.8+
+- Basic knowledge of Spring Boot and reactive programming
+
+## Project Setup
+
+### Folder Structure
+
+```
+spring-native-cloud/
+├── src/
+│   ├── main/
+│   │   ├── java/com/example/demo/
+│   │   │   ├── DemoApplication.java
+│   │   │   ├── controller/
+│   │   │   │   └── GreetingController.java
+│   │   │   ├── config/
+│   │   │   │   └── CloudConfig.java
+│   │   │   └── service/
+│   │   │       └── GreetingService.java
+│   │   ├── resources/
+│   │   │   ├── application.properties
+│   │   │   ├── bootstrap.properties
+│   │   │   └── k8s/
+│   │   │       ├── deployment.yaml
+│   │   │       └── service.yaml
+│   │   └── docker/
+│   │       └── Dockerfile
+├── .dockerignore
+├── pom.xml
+└── README.md
+```
+
+### pom.xml
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.example</groupId>
+    <artifactId>demo</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>demo</name>
+    <description>Spring Native Cloud Demo</description>
+
+    <properties>
+        <java.version>17</java.version>
+        <spring-native.version>0.12.1</spring-native.version>
+    </properties>
+
+    <dependencies>
+        <!-- Spring Boot Starters -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-config</artifactId>
+        </dependency>
+
+        <!-- Observability -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-reporter-brave</artifactId>
+        </dependency>
+
+        <!-- Spring Native -->
+        <dependency>
+            <groupId>org.springframework.experimental</groupId>
+            <artifactId>spring-native</artifactId>
+            <version>${spring-native.version}</version>
+        </dependency>
+    </dependencies>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>2023.0.0</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <image>
+                        <builder>paketobuildpacks/builder:tiny</builder>
+                        <env>
+                            <BP_NATIVE_IMAGE>true</BP_NATIVE_IMAGE>
+                        </env>
+                    </image>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.1</version>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>native</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>0.9.28</version>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
+```
+
+## Spring Native Compilation
+
+### DemoApplication.java
+
+```java
+package com.example.demo;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.nativex.hint.TypeHint;
+
+@TypeHint(
+    types = {
+        com.example.demo.controller.GreetingController.class,
+        com.example.demo.service.GreetingService.class
+    },
+    typeNames = {
+        "com.example.demo.config.CloudConfig"
+    }
+)
+@SpringBootApplication
+public class DemoApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DemoApplication.class, args);
+    }
+}
+```
+
+### Build Native Image
+
+```bash
+mvn -Pnative spring-boot:build-image
+```
+
+Or for direct native compilation:
+
+```bash
+mvn -Pnative clean package
+```
+
+## Containerization with Docker
+
+### Dockerfile
+
+```dockerfile
+# Stage 1: Build the application
+FROM eclipse-temurin:17-jdk-jammy as builder
+WORKDIR /workspace/app
+
+COPY mvnw .
+COPY .mvn .mvn
+COPY pom.xml .
+COPY src src
+
+RUN ./mvnw install -DskipTests
+
+# Stage 2: Create the production image
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+COPY --from=builder /workspace/app/target/*.jar app.jar
+
+# For native image
+# COPY --from=builder /workspace/app/target/demo app
+
+EXPOSE 8080
+
+# For JVM
+ENTRYPOINT ["java", "-jar", "app.jar"]
+
+# For native image
+# ENTRYPOINT ["./demo"]
+```
+
+### .dockerignore
+
+```
+.git
+.gitignore
+target
+.mvn
+mvnw
+mvnw.cmd
+*.iml
+.idea
+*.log
+*.jar
+Dockerfile
+```
+
+### Build and Run Docker Image
+
+```bash
+docker build -t spring-native-cloud-demo .
+docker run -p 8080:8080 spring-native-cloud-demo
+```
+
+## Kubernetes Deployment
+
+### deployment.yaml
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spring-native-cloud-demo
+  labels:
+    app: spring-native-cloud-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: spring-native-cloud-demo
+  template:
+    metadata:
+      labels:
+        app: spring-native-cloud-demo
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8080'
+        prometheus.io/path: '/actuator/prometheus'
+    spec:
+      containers:
+        - name: spring-native-cloud-demo
+          image: spring-native-cloud-demo
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: '500m'
+              memory: '512Mi'
+            limits:
+              cpu: '1000m'
+              memory: '1024Mi'
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: 'kubernetes'
+```
+
+### service.yaml
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: spring-native-cloud-demo-service
+spec:
+  selector:
+    app: spring-native-cloud-demo
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: LoadBalancer
+```
+
+### Deploy to Kubernetes
+
+```bash
+kubectl apply -f src/main/resources/k8s/deployment.yaml
+kubectl apply -f src/main/resources/k8s/service.yaml
+```
+
+## Cloud Configuration
+
+### bootstrap.properties
+
+```properties
+spring.application.name=spring-native-cloud-demo
+spring.cloud.config.uri=http://localhost:8888
+spring.cloud.config.fail-fast=true
+```
+
+### CloudConfig.java
+
+```java
+package com.example.demo.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.cloud.config.server.EnableConfigServer;
+
+@Configuration
+@EnableConfigServer
+public class CloudConfig {
+}
+```
+
+### application.properties
+
+```properties
+# Server
+server.port=8080
+
+# Actuator
+management.endpoints.web.exposure.include=health,info,prometheus,metrics,loggers
+management.endpoint.health.probes.enabled=true
+management.endpoint.health.show-details=always
+management.health.livenessState.enabled=true
+management.health.readinessState.enabled=true
+
+# Tracing
+management.tracing.sampling.probability=1.0
+spring.zipkin.base-url=http://localhost:9411
+spring.sleuth.sampler.probability=1.0
+
+# Native hints
+spring.aop.proxy-target-class=false
+```
+
+## Observability
+
+### GreetingService.java
+
+```java
+package com.example.demo.service;
+
+import io.micrometer.observation.annotation.Observed;
+import org.springframework.stereotype.Service;
+
+@Service
+public class GreetingService {
+
+    @Observed(
+        name = "greeting.service",
+        contextualName = "greeting-service",
+        lowCardinalityKeyValues = {"serviceType", "greeting"}
+    )
+    public String greet(String name) {
+        if (name == null || name.isEmpty()) {
+            throw new IllegalArgumentException("Name cannot be empty");
+        }
+        return "Hello, " + name + "!";
+    }
+}
+```
+
+### GreetingController.java
+
+```java
+package com.example.demo.controller;
+
+import com.example.demo.service.GreetingService;
+import io.micrometer.core.annotation.Timed;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@Timed(value = "greeting.controller", description = "Time taken to process greeting requests")
+public class GreetingController {
+
+    private final GreetingService greetingService;
+
+    public GreetingController(GreetingService greetingService) {
+        this.greetingService = greetingService;
+    }
+
+    @GetMapping("/greet")
+    public String greet(@RequestParam(value = "name", defaultValue = "World") String name) {
+        return greetingService.greet(name);
+    }
+
+    @GetMapping("/health")
+    public String health() {
+        return "OK";
+    }
+}
+```
+
+## Complete Sample Application
+
+### Running the Application
+
+1. **Build Native Image:**
+
+```bash
+mvn -Pnative spring-boot:build-image
+```
+
+2. **Run with Docker:**
+
+```bash
+docker run -p 8080:8080 spring-native-cloud-demo
+```
+
+3. **Access Endpoints:**
+
+- Application: `http://localhost:8080/greet?name=Spring`
+- Actuator: `http://localhost:8080/actuator`
+- Prometheus Metrics: `http://localhost:8080/actuator/prometheus`
+- Health: `http://localhost:8080/actuator/health`
+
+### Kubernetes Deployment
+
+1. **Build and push Docker image:**
+
+```bash
+docker build -t your-repo/spring-native-cloud-demo:1.0.0 .
+docker push your-repo/spring-native-cloud-demo:1.0.0
+```
+
+2. **Update deployment.yaml with your image:**
+
+```yaml
+image: your-repo/spring-native-cloud-demo:1.0.0
+```
+
+3. **Deploy to Kubernetes:**
+
+```bash
+kubectl apply -f src/main/resources/k8s/deployment.yaml
+kubectl apply -f src/main/resources/k8s/service.yaml
+```
+
+This complete tutorial provides everything you need to build, containerize, and deploy a Spring Native application with cloud-native features including observability and Kubernetes support.

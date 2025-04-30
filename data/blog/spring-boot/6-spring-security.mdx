@@ -9,37 +9,37 @@ authors: ['default']
 
 ## Table of Contents
 
-1. [Environment Setup with Docker](#environment-setup)
-2. [Project Structure](#project-structure)
+1. [Docker Compose for PostgreSQL](#docker-compose-for-postgresql)
+2. [Project Setup](#project-setup)
 3. [Authentication Strategies](#authentication-strategies)
 4. [Authorization Rules](#authorization-rules)
-5. [OAuth 2.0 and JWT](#oauth-and-jwt)
+5. [OAuth 2.0 and JWT](#oauth-20-and-jwt)
 6. [Password Encoding](#password-encoding)
-7. [Method-Level Security](#method-level-security)
-8. [Auth Flow Implementation](#auth-flow-implementation)
+7. [Method-level Security](#method-level-security)
+8. [User Management](#user-management)
 9. [Best Practices](#best-practices)
 10. [Learning Resources](#learning-resources)
 
-## Environment Setup with Docker <a name="environment-setup"></a>
+## Docker Compose for PostgreSQL
+
+Let's start with setting up PostgreSQL using Docker:
 
 ```yaml
 # docker-compose.yml
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:13-alpine
-    container_name: spring_postgres
+    image: postgres:13
+    container_name: spring_security_postgres
     environment:
-      POSTGRES_DB: security_demo
-      POSTGRES_USER: demo_user
-      POSTGRES_PASSWORD: demo_pass
+      POSTGRES_USER: security_user
+      POSTGRES_PASSWORD: security_pass
+      POSTGRES_DB: security_db
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U demo_user']
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s
       timeout: 5s
       retries: 5
@@ -48,445 +48,905 @@ volumes:
   postgres_data:
 ```
 
-## Project Structure <a name="project-structure"></a>
+Run with:
 
-```
-src/
-├── main/
-│   ├── java/
-│   │   └── com/example/demo/
-│   │       ├── config/
-│   │       ├── controller/
-│   │       ├── dto/
-│   │       ├── entity/
-│   │       ├── exception/
-│   │       ├── repository/
-│   │       ├── security/
-│   │       ├── service/
-│   │       └── DemoApplication.java
-│   └── resources/
-│       └── application.yml
+```bash
+docker-compose up -d
 ```
 
-## Authentication Strategies <a name="authentication-strategies"></a>
+## Project Setup
 
-Spring Security supports multiple authentication strategies:
+Add these dependencies to your `pom.xml`:
 
-1. **Form-Based Authentication** - Traditional username/password form
-2. **JWT (JSON Web Tokens)** - Stateless token-based authentication
-3. **OAuth 2.0** - Delegated authentication
-4. **LDAP** - Enterprise directory services
-5. **SAML** - Enterprise single sign-on
+```xml
+<dependencies>
+    <!-- Spring Boot Starter -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
 
-## Authorization Rules <a name="authorization-rules"></a>
+    <!-- Spring Security -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.security</groupId>
+        <artifactId>spring-security-oauth2-resource-server</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.security</groupId>
+        <artifactId>spring-security-oauth2-jose</artifactId>
+    </dependency>
 
-Role-based access control example:
+    <!-- Database -->
+    <dependency>
+        <groupId>org.postgresql</groupId>
+        <artifactId>postgresql</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+
+    <!-- Lombok -->
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <optional>true</optional>
+    </dependency>
+
+    <!-- JWT -->
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-api</artifactId>
+        <version>0.11.2</version>
+    </dependency>
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-impl</artifactId>
+        <version>0.11.2</version>
+        <scope>runtime</scope>
+    </dependency>
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-jackson</artifactId>
+        <version>0.11.2</version>
+        <scope>runtime</scope>
+    </dependency>
+</dependencies>
+```
+
+## Authentication Strategies
+
+### 1. Database Authentication
+
+First, let's create our User entity:
 
 ```java
-@Configuration
-@EnableWebSecurity
-@RequiredArgsConstructor
-public class SecurityConfig {
+// src/main/java/com/example/security/entity/User.java
+package com.example.security.entity;
 
-    private final JwtAuthenticationFilter jwtAuthFilter;
-    private final AuthenticationProvider authenticationProvider;
+import lombok.*;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-            .csrf(AbstractHttpConfigurer::disable)
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/**").permitAll()
-                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
-                .requestMatchers("/api/v1/user/**").hasAnyRole("USER", "ADMIN")
-                .anyRequest().authenticated()
-            )
-            .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authenticationProvider(authenticationProvider)
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+import javax.persistence.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Set;
+import java.util.stream.Collectors;
 
-        return http.build();
+@Entity
+@Table(name = "users")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class User implements UserDetails {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String username;
+
+    @Column(nullable = false)
+    private String password;
+
+    @Column(nullable = false)
+    private boolean enabled = true;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "role")
+    private Set<String> roles;
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return roles.stream()
+                .map(SimpleGrantedAuthority::new)
+                .collect(Collectors.toSet());
     }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+}
+
+// src/main/java/com/example/security/entity/RefreshToken.java
+package com.example.security.entity;
+
+import lombok.*;
+
+import javax.persistence.*;
+import java.time.Instant;
+
+@Entity
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Table(name = "refresh_tokens")
+public class RefreshToken {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @OneToOne
+    @JoinColumn(name = "user_id", referencedColumnName = "id")
+    private User user;
+
+    @Column(nullable = false, unique = true)
+    private String token;
+
+    @Column(nullable = false)
+    private Instant expiryDate;
 }
 ```
 
-## OAuth 2.0 and JWT <a name="oauth-and-jwt"></a>
-
-### JWT Configuration
+Create the repository:
 
 ```java
-@Service
+// src/main/java/com/example/security/repository/UserRepository.java
+package com.example.security.repository;
+
+import com.example.security.entity.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByUsername(String username);
+    boolean existsByUsername(String username);
+}
+
+// src/main/java/com/example/security/repository/RefreshTokenRepository.java
+package com.example.security.repository;
+
+import com.example.security.entity.RefreshToken;
+import com.example.security.entity.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+    Optional<RefreshToken> findByToken(String token);
+    Optional<RefreshToken> findByUser(User user);
+    void deleteByUser(User user);
+}
+```
+
+### 2. JWT Authentication
+
+Create JWT utility classes:
+
+```java
+// src/main/java/com/example/security/config/JwtConfig.java
+package com.example.security.config;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+@Data
+@Configuration
+@ConfigurationProperties(prefix = "jwt")
+public class JwtConfig {
+    private String secret;
+    private long expirationMs;
+    private long refreshExpirationMs;
+}
+```
+
+```java
+// src/main/java/com/example/security/util/JwtUtil.java
+package com.example.security.util;
+
+import com.example.security.config.JwtConfig;
+import com.example.security.entity.User;
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+import java.util.stream.Collectors;
+
+@Component
 @RequiredArgsConstructor
-public class JwtService {
+@Slf4j
+public class JwtUtil {
+    private final JwtConfig jwtConfig;
 
-    private static final String SECRET_KEY = "your-256-bit-secret";
-    private static final long EXPIRATION_TIME = 864_000_000; // 10 days
-
-    public String generateToken(UserDetails userDetails) {
-        return generateToken(new HashMap<>(), userDetails);
-    }
-
-    public String generateToken(
-        Map<String, Object> extraClaims,
-        UserDetails userDetails
-    ) {
-        return Jwts.builder()
-            .setClaims(extraClaims)
-            .setSubject(userDetails.getUsername())
-            .setIssuedAt(new Date(System.currentTimeMillis()))
-            .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
-            .signWith(getSignInKey(), SignatureAlgorithm.HS256)
-            .compact();
-    }
-
-    private Key getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(SECRET_KEY);
+    private Key getSigningKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(jwtConfig.getSecret());
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    // Add validateToken, extractUsername, etc.
+    public String generateToken(Authentication authentication) {
+        User userPrincipal = (User) authentication.getPrincipal();
+
+        return Jwts.builder()
+                .setSubject(userPrincipal.getUsername())
+                .claim("roles", userPrincipal.getAuthorities().stream()
+                        .map(GrantedAuthority::getAuthority)
+                        .collect(Collectors.toList()))
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtConfig.getExpirationMs()))
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public String generateTokenFromUsername(String username) {
+        return Jwts.builder()
+                .setSubject(username)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtConfig.getExpirationMs()))
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parserBuilder().setSigningKey(getSigningKey()).build().parseClaimsJws(authToken);
+            return true;
+        } catch (MalformedJwtException e) {
+            log.error("Invalid JWT token: {}", e.getMessage());
+        } catch (ExpiredJwtException e) {
+            log.error("JWT token is expired: {}", e.getMessage());
+        } catch (UnsupportedJwtException e) {
+            log.error("JWT token is unsupported: {}", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            log.error("JWT claims string is empty: {}", e.getMessage());
+        }
+        return false;
+    }
 }
 ```
 
-### OAuth 2.0 Resource Server Config
+## Authorization Rules
+
+Configure security:
 
 ```java
+// src/main/java/com/example/security/config/SecurityConfig.java
+package com.example.security.config;
+
+import com.example.security.security.JwtAuthEntryPoint;
+import com.example.security.security.JwtAuthFilter;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
 @Configuration
 @EnableWebSecurity
-public class OAuth2SecurityConfig {
+@EnableGlobalMethodSecurity(prePostEnabled = true)
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final JwtAuthEntryPoint unauthorizedHandler;
+    private final JwtAuthFilter jwtAuthFilter;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-            .authorizeHttpRequests(auth -> auth
-                .anyRequest().authenticated()
-            )
-            .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(jwt -> jwt
-                    .decoder(jwtDecoder())
-                )
-            );
+            .cors().and()
+            .csrf().disable()
+            .exceptionHandling().authenticationEntryPoint(unauthorizedHandler).and()
+            .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
+            .authorizeRequests()
+                .antMatchers("/api/auth/**").permitAll()
+                .antMatchers("/api/test/**").permitAll()
+                .antMatchers("/api/admin/**").hasRole("ADMIN")
+                .antMatchers("/api/user/**").hasAnyRole("USER", "ADMIN")
+                .anyRequest().authenticated();
+
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
 
     @Bean
-    public JwtDecoder jwtDecoder() {
-        return NimbusJwtDecoder.withJwkSetUri("https://your-oauth-provider/.well-known/jwks.json").build();
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+
+// src/main/java/com/example/security/security/JwtAuthEntryPoint.java
+package com.example.security.security;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class JwtAuthEntryPoint implements AuthenticationEntryPoint {
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response,
+                        AuthenticationException authException) throws IOException {
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+
+        final Map<String, Object> body = new HashMap<>();
+        body.put("status", HttpServletResponse.SC_UNAUTHORIZED);
+        body.put("error", "Unauthorized");
+        body.put("message", authException.getMessage());
+        body.put("path", request.getServletPath());
+
+        final ObjectMapper mapper = new ObjectMapper();
+        mapper.writeValue(response.getOutputStream(), body);
+    }
+}
+
+// src/main/java/com/example/security/security/JwtAuthFilter.java
+package com.example.security.security;
+
+import com.example.security.util.JwtUtil;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+
+@Component
+@RequiredArgsConstructor
+public class JwtAuthFilter extends OncePerRequestFilter {
+    private final JwtUtil jwtUtil;
+    private final UserDetailsService userDetailsService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                  FilterChain filterChain) throws ServletException, IOException {
+        try {
+            String jwt = parseJwt(request);
+            if (jwt != null && jwtUtil.validateJwtToken(jwt)) {
+                String username = jwtUtil.getUserNameFromJwtToken(jwt);
+
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(
+                        userDetails,
+                        null,
+                        userDetails.getAuthorities());
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            logger.error("Cannot set user authentication: {}", e);
+        }
+
+        filterChain.doFilter(request, response);
+    }
+
+    private String parseJwt(HttpServletRequest request) {
+        String headerAuth = request.getHeader("Authorization");
+
+        if (StringUtils.hasText(headerAuth) && headerAuth.startsWith("Bearer ")) {
+            return headerAuth.substring(7);
+        }
+
+        return null;
     }
 }
 ```
 
-## Password Encoding <a name="password-encoding"></a>
+## OAuth 2.0 and JWT
 
-Always use strong password encoders:
+Add OAuth2 resource server configuration:
 
 ```java
-@Configuration
-public class PasswordConfig {
+// src/main/java/com/example/security/config/OAuth2Config.java
+package com.example.security.config;
 
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+
+@Configuration
+public class OAuth2Config {
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12); // Strength 12 is recommended
+    public JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+        grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
+        grantedAuthoritiesConverter.setAuthoritiesClaimName("roles");
+
+        JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+        jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+        return jwtAuthenticationConverter;
     }
 }
+```
+
+## Password Encoding
+
+We already configured BCryptPasswordEncoder in the SecurityConfig. Here's how to use it:
+
+```java
+// src/main/java/com/example/security/service/UserService.java
+package com.example.security.service;
+
+import com.example.security.entity.User;
+import com.example.security.exception.ResourceAlreadyExistsException;
+import com.example.security.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Collections;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
-
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public User registerUser(RegistrationRequest request) {
-        var user = User.builder()
-            .email(request.getEmail())
-            .password(passwordEncoder.encode(request.getPassword()))
-            .role(Role.USER)
-            .build();
+    @Transactional
+    public User registerUser(String username, String password, Set<String> roles) {
+        if (userRepository.existsByUsername(username)) {
+            throw new ResourceAlreadyExistsException("Username is already taken");
+        }
+
+        User user = User.builder()
+                .username(username)
+                .password(passwordEncoder.encode(password))
+                .roles(roles)
+                .build();
+
         return userRepository.save(user);
     }
 }
 ```
 
-## Method-Level Security <a name="method-level-security"></a>
+## Method-level Security
+
+Example of using method-level security:
 
 ```java
-@RestController
-@RequestMapping("/api/v1/admin")
+// src/main/java/com/example/security/service/UserService.java
+// Add these methods to the UserService class
+
+import org.springframework.security.access.prepost.PreAuthorize;
+
 @PreAuthorize("hasRole('ADMIN')")
-public class AdminController {
-
-    @GetMapping
-    @PreAuthorize("hasAuthority('admin:read')")
-    public String getAdminData() {
-        return "Admin data";
-    }
-
-    @PostMapping
-    @PreAuthorize("hasAuthority('admin:create')")
-    public String createAdminData() {
-        return "Admin data created";
-    }
+public List<User> getAllUsers() {
+    return userRepository.findAll();
 }
 
-@Service
-public class ProductService {
+@PreAuthorize("#username == authentication.principal.username or hasRole('ADMIN')")
+public User getUserByUsername(String username) {
+    return userRepository.findByUsername(username)
+            .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+}
 
-    @PreAuthorize("hasRole('USER') and #userId == authentication.principal.id")
-    public List<Product> getUserProducts(Long userId) {
-        // implementation
-    }
-
-    @PostAuthorize("returnObject.owner == authentication.name")
-    public Product getProduct(Long id) {
-        // implementation
-    }
-
-    @Secured({"ROLE_ADMIN", "ROLE_SUPER_ADMIN"})
-    public void deleteProduct(Long id) {
-        // implementation
-    }
+@PreAuthorize("hasRole('ADMIN')")
+public void deleteUser(Long userId) {
+    userRepository.deleteById(userId);
 }
 ```
 
-## Auth Flow Implementation <a name="auth-flow-implementation"></a>
-
-### Entity with Lombok
-
-```java
-@Entity
-@Table(name = "users")
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class User {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(unique = true, nullable = false)
-    private String email;
-
-    @Column(nullable = false)
-    private String password;
-
-    @Enumerated(EnumType.STRING)
-    private Role role;
-
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private List<Token> tokens;
-}
-
-@Entity
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class Token {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(unique = true)
-    private String token;
-
-    @Enumerated(EnumType.STRING)
-    private TokenType tokenType;
-
-    private boolean expired;
-    private boolean revoked;
-
-    @ManyToOne
-    @JoinColumn(name = "user_id")
-    private User user;
-}
-
-public enum Role {
-    USER,
-    ADMIN
-}
-
-public enum TokenType {
-    BEARER
-}
-```
+## User Management
 
 ### Auth Controller
 
 ```java
-@RestController
-@RequestMapping("/api/v1/auth")
-@RequiredArgsConstructor
-public class AuthenticationController {
+// src/main/java/com/example/security/controller/AuthController.java
+package com.example.security.controller;
 
-    private final AuthenticationService authenticationService;
+import com.example.security.entity.RefreshToken;
+import com.example.security.entity.User;
+import com.example.security.exception.TokenRefreshException;
+import com.example.security.payload.request.LoginRequest;
+import com.example.security.payload.request.RefreshTokenRequest;
+import com.example.security.payload.request.RegisterRequest;
+import com.example.security.payload.response.JwtResponse;
+import com.example.security.payload.response.MessageResponse;
+import com.example.security.payload.response.RefreshTokenResponse;
+import com.example.security.repository.UserRepository;
+import com.example.security.security.UserDetailsImpl;
+import com.example.security.service.RefreshTokenService;
+import com.example.security.service.UserService;
+import com.example.security.util.JwtUtil;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+
+import javax.validation.Valid;
+import java.util.Set;
+
+@RestController
+@RequestMapping("/api/auth")
+@RequiredArgsConstructor
+public class AuthController {
+    private final AuthenticationManager authenticationManager;
+    private final UserService userService;
+    private final UserRepository userRepository;
+    private final JwtUtil jwtUtil;
+    private final RefreshTokenService refreshTokenService;
+
+    @PostMapping("/login")
+    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        loginRequest.getUsername(),
+                        loginRequest.getPassword()));
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        String jwt = jwtUtil.generateToken(authentication);
+
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+
+        return ResponseEntity.ok(new JwtResponse(
+                jwt,
+                refreshToken.getToken(),
+                userDetails.getId(),
+                userDetails.getUsername(),
+                userDetails.getAuthorities().stream()
+                        .map(item -> item.getAuthority())
+                        .collect(Collectors.toSet())));
+    }
 
     @PostMapping("/register")
-    public ResponseEntity<AuthenticationResponse> register(
-        @RequestBody RegisterRequest request
-    ) {
-        return ResponseEntity.ok(authenticationService.register(request));
+    public ResponseEntity<?> registerUser(@Valid @RequestBody RegisterRequest registerRequest) {
+        if (userRepository.existsByUsername(registerRequest.getUsername())) {
+            return ResponseEntity
+                    .badRequest()
+                    .body(new MessageResponse("Error: Username is already taken!"));
+        }
+
+        User user = userService.registerUser(
+                registerRequest.getUsername(),
+                registerRequest.getPassword(),
+                Set.of("USER"));
+
+        return ResponseEntity.ok(new MessageResponse("User registered successfully!"));
     }
 
-    @PostMapping("/authenticate")
-    public ResponseEntity<AuthenticationResponse> authenticate(
-        @RequestBody AuthenticationRequest request
-    ) {
-        return ResponseEntity.ok(authenticationService.authenticate(request));
+    @PostMapping("/refreshtoken")
+    public ResponseEntity<?> refreshtoken(@Valid @RequestBody RefreshTokenRequest request) {
+        String requestRefreshToken = request.getRefreshToken();
+
+        return refreshTokenService.findByToken(requestRefreshToken)
+                .map(refreshTokenService::verifyExpiration)
+                .map(RefreshToken::getUser)
+                .map(user -> {
+                    String token = jwtUtil.generateTokenFromUsername(user.getUsername());
+                    return ResponseEntity.ok(new RefreshTokenResponse(token, requestRefreshToken));
+                })
+                .orElseThrow(() -> new TokenRefreshException(requestRefreshToken, "Refresh token is not in database!"));
     }
 
-    @PostMapping("/refresh-token")
-    public ResponseEntity<AuthenticationResponse> refreshToken(
-        HttpServletRequest request
-    ) {
-        return ResponseEntity.ok(authenticationService.refreshToken(request));
+    @PostMapping("/logout")
+    public ResponseEntity<?> logoutUser() {
+        UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        refreshTokenService.deleteByUserId(userDetails.getId());
+        return ResponseEntity.ok(new MessageResponse("Log out successful!"));
     }
 }
 ```
 
-### Auth Service
+### Refresh Token Service
 
 ```java
+// src/main/java/com/example/security/service/RefreshTokenService.java
+package com.example.security.service;
+
+import com.example.security.entity.RefreshToken;
+import com.example.security.entity.User;
+import com.example.security.exception.TokenRefreshException;
+import com.example.security.repository.RefreshTokenRepository;
+import com.example.security.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
 @Service
 @RequiredArgsConstructor
-public class AuthenticationService {
-
+public class RefreshTokenService {
+    private final RefreshTokenRepository refreshTokenRepository;
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final JwtService jwtService;
-    private final AuthenticationManager authenticationManager;
-    private final TokenRepository tokenRepository;
 
-    public AuthenticationResponse register(RegisterRequest request) {
-        var user = User.builder()
-            .email(request.getEmail())
-            .password(passwordEncoder.encode(request.getPassword()))
-            .role(Role.USER)
-            .build();
+    @Value("${jwt.refreshExpirationMs}")
+    private Long refreshTokenDurationMs;
 
-        var savedUser = userRepository.save(user);
-        var jwtToken = jwtService.generateToken(user);
-        var refreshToken = jwtService.generateRefreshToken(user);
-        saveUserToken(savedUser, jwtToken);
-
-        return AuthenticationResponse.builder()
-            .accessToken(jwtToken)
-            .refreshToken(refreshToken)
-            .build();
+    public Optional<RefreshToken> findByToken(String token) {
+        return refreshTokenRepository.findByToken(token);
     }
 
-    public AuthenticationResponse authenticate(AuthenticationRequest request) {
-        authenticationManager.authenticate(
-            new UsernamePasswordAuthenticationToken(
-                request.getEmail(),
-                request.getPassword()
-            )
-        );
+    public RefreshToken createRefreshToken(Long userId) {
+        RefreshToken refreshToken = new RefreshToken();
 
-        var user = userRepository.findByEmail(request.getEmail())
-            .orElseThrow();
-        var jwtToken = jwtService.generateToken(user);
-        var refreshToken = jwtService.generateRefreshToken(user);
+        refreshToken.setUser(userRepository.findById(userId).get());
+        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
+        refreshToken.setToken(UUID.randomUUID().toString());
 
-        revokeAllUserTokens(user);
-        saveUserToken(user, jwtToken);
-
-        return AuthenticationResponse.builder()
-            .accessToken(jwtToken)
-            .refreshToken(refreshToken)
-            .build();
+        refreshToken = refreshTokenRepository.save(refreshToken);
+        return refreshToken;
     }
 
-    private void saveUserToken(User user, String jwtToken) {
-        var token = Token.builder()
-            .user(user)
-            .token(jwtToken)
-            .tokenType(TokenType.BEARER)
-            .expired(false)
-            .revoked(false)
-            .build();
-        tokenRepository.save(token);
-    }
-
-    private void revokeAllUserTokens(User user) {
-        var validUserTokens = tokenRepository.findAllValidTokensByUser(user.getId());
-        if (validUserTokens.isEmpty())
-            return;
-
-        validUserTokens.forEach(t -> {
-            t.setExpired(true);
-            t.setRevoked(true);
-        });
-        tokenRepository.saveAll(validUserTokens);
-    }
-
-    public AuthenticationResponse refreshToken(HttpServletRequest request) {
-        final String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer "))
-            throw new AuthenticationException("Refresh token is missing");
-
-        final String refreshToken = authHeader.substring(7);
-        final String userEmail = jwtService.extractUsername(refreshToken);
-
-        if (userEmail != null) {
-            var user = userRepository.findByEmail(userEmail)
-                .orElseThrow();
-
-            if (jwtService.isTokenValid(refreshToken, user)) {
-                var accessToken = jwtService.generateToken(user);
-                revokeAllUserTokens(user);
-                saveUserToken(user, accessToken);
-
-                return AuthenticationResponse.builder()
-                    .accessToken(accessToken)
-                    .refreshToken(refreshToken)
-                    .build();
-            }
+    public RefreshToken verifyExpiration(RefreshToken token) {
+        if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
+            refreshTokenRepository.delete(token);
+            throw new TokenRefreshException(token.getToken(), "Refresh token was expired. Please make a new signin request");
         }
-        throw new AuthenticationException("Invalid refresh token");
+        return token;
+    }
+
+    @Transactional
+    public void deleteByUserId(Long userId) {
+        refreshTokenRepository.deleteByUser(userRepository.findById(userId).get());
     }
 }
 ```
 
-## Best Practices <a name="best-practices"></a>
+### Test Controller
 
-1. **Always use HTTPS** - Never transmit tokens or credentials over unencrypted channels
-2. **Secure JWT storage** - Use HttpOnly, Secure, SameSite cookies for web apps
-3. **Short-lived access tokens** - Typical lifetime 5-15 minutes
-4. **Refresh token rotation** - Issue new refresh token with each use
-5. **Strong password hashing** - Use BCrypt with sufficient work factor (10-12)
-6. **Principle of least privilege** - Grant minimum required permissions
-7. **Input validation** - Validate all authentication inputs
-8. **Rate limiting** - Prevent brute force attacks
-9. **Logging and monitoring** - Track authentication attempts
-10. **Regular dependency updates** - Keep security libraries current
+```java
+// src/main/java/com/example/security/controller/TestController.java
+package com.example.security.controller;
 
-## Learning Resources <a name="learning-resources"></a>
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@CrossOrigin(origins = "*", maxAge = 3600)
+@RestController
+@RequestMapping("/api/test")
+public class TestController {
+    @GetMapping("/all")
+    public String allAccess() {
+        return "Public Content.";
+    }
+
+    @GetMapping("/user")
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    public String userAccess() {
+        return "User Content.";
+    }
+
+    @GetMapping("/admin")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String adminAccess() {
+        return "Admin Board.";
+    }
+}
+```
+
+## Best Practices
+
+1. **Password Security**:
+
+   - Always use strong password encoding (BCrypt)
+   - Never store plain text passwords
+   - Implement password complexity requirements
+
+2. **JWT Security**:
+
+   - Use short expiration times for access tokens (15-30 minutes)
+   - Implement refresh tokens with longer expiration (7 days)
+   - Store refresh tokens securely (HTTP-only cookies)
+   - Rotate refresh tokens on each use
+
+3. **Session Management**:
+
+   - Use stateless sessions with JWT
+   - Implement proper token invalidation on logout
+   - Limit concurrent sessions if needed
+
+4. **General Security**:
+
+   - Always use HTTPS
+   - Implement CSRF protection for stateful applications
+   - Use CORS carefully (restrict origins)
+   - Sanitize all user inputs
+   - Implement rate limiting
+   - Keep dependencies updated
+
+5. **Database Security**:
+   - Use separate database users with least privileges
+   - Encrypt sensitive data at rest
+   - Regularly backup your database
+
+## Learning Resources
 
 1. **Official Documentation**:
 
    - [Spring Security Reference](https://docs.spring.io/spring-security/reference/)
-   - [OAuth 2.0 RFC](https://tools.ietf.org/html/rfc6749)
-   - [JWT RFC](https://tools.ietf.org/html/rfc7519)
+   - [Spring Security OAuth2](https://spring.io/projects/spring-security-oauth)
 
 2. **Books**:
 
    - "Spring Security in Action" by Laurentiu Spilca
-   - "OAuth 2 in Action" by Justin Richer, Antonio Sanso
+   - "Spring Security" by Mick Knutson, Robert Winch, Peter Mularien
 
 3. **Online Courses**:
 
-   - Spring Security Zero to Mastery on Udemy
-   - OAuth 2.0 and OpenID Connect by Okta on Pluralsight
+   - [Spring Security Fundamentals on Pluralsight](https://www.pluralsight.com/courses/spring-security-fundamentals)
+   - [Spring Boot Security on Udemy](https://www.udemy.com/course/spring-security-core-beginner-to-guru/)
 
 4. **Tutorials**:
 
    - [Baeldung Spring Security](https://www.baeldung.com/security-spring)
-   - [Spring.io Guides](https://spring.io/guides/topicals/spring-security/)
+   - [Spring Security JWT Tutorial](https://www.bezkoder.com/spring-boot-jwt-authentication/)
 
-5. **Security Best Practices**:
-   - [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/)
-   - [Spring Security Best Practices](https://spring.io/blog/2022/02/21/spring-security-without-the-websecurityconfigureradapter)
+5. **Sample Projects**:
+   - [Spring Security Samples](https://github.com/spring-projects/spring-security-samples)
+   - [Spring Boot + React JWT Auth](https://github.com/bezkoder/spring-boot-react-jwt-auth)
+
+## Application Properties
+
+Add this to your `application.yml`:
+
+```yaml
+# src/main/resources/application.yml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/security_db
+    username: security_user
+    password: security_pass
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: true
+
+jwt:
+  secret: yourSecretKeyForJWTSigningMustBeAtLeast64CharactersLong1234567890abcdefghijklmnopqrstuvwxyz
+  expirationMs: 86400000 # 24 hours
+  refreshExpirationMs: 604800000 # 7 days
+
+logging:
+  level:
+    org.springframework.security: DEBUG
+```
+
+## Complete Working Example
+
+To run this complete example:
+
+1. Start PostgreSQL with Docker:
+
+   ```bash
+   docker-compose up -d
+   ```
+
+2. Run the Spring Boot application
+
+3. Test the endpoints:
+
+- Register a new user:
+
+  ```bash
+  curl -X POST -H "Content-Type: application/json" -d '{"username":"user1","password":"password123"}' http://localhost:8080/api/auth/register
+  ```
+
+- Login to get JWT token:
+
+  ```bash
+  curl -X POST -H "Content-Type: application/json" -d '{"username":"user1","password":"password123"}' http://localhost:8080/api/auth/login
+  ```
+
+- Access protected endpoint:
+
+  ```bash
+  curl -X GET -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/api/test/user
+  ```
+
+- Refresh token:
+
+  ```bash
+  curl -X POST -H "Content-Type: application/json" -d '{"refreshToken":"YOUR_REFRESH_TOKEN"}' http://localhost:8080/api/auth/refreshtoken
+  ```
+
+- Logout:
+  ```bash
+  curl -X POST -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/api/auth/logout
+  ```
+
+This complete tutorial provides all the necessary components for a production-ready Spring Security implementation with JWT authentication, role-based authorization, and refresh token functionality.

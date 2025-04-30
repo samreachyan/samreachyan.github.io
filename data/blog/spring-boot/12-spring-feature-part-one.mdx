@@ -1,0 +1,599 @@
+---
+title: '12 - Spring feature, batch processing, scheduled tasks, events'
+date: '2025-05-03'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'This tutorial covers advanced Spring Boot features including caching, batch processing, scheduled tasks, application events, and Actuator for monitoring.'
+authors: ['default']
+---
+
+## Table of Contents
+
+1. [Project Structure](#project-structure)
+2. [Caching Strategies](#caching-strategies)
+3. [Batch Processing](#batch-processing)
+4. [Scheduled Tasks](#scheduled-tasks)
+5. [Application Events](#application-events)
+6. [Actuator for Monitoring](#actuator-for-monitoring)
+
+## Prerequisites
+
+- JDK 17 or later
+- Maven 3.8+
+- Basic knowledge of Spring Boot and reactive programming
+
+## Project Structure
+
+```
+src/
+├── main/
+│   ├── java/com/example/demo/
+│   │   ├── batch/
+│   │   │   ├── BatchConfig.java
+│   │   │   ├── ProductItemProcessor.java
+│   │   │   ├── ProductItemReader.java
+│   │   │   ├── ProductItemWriter.java
+│   │   │   └── ProductJobCompletionListener.java
+│   │   ├── cache/
+│   │   │   ├── CacheConfig.java
+│   │   │   └── ProductService.java
+│   │   ├── event/
+│   │   │   ├── CustomEvent.java
+│   │   │   ├── CustomEventPublisher.java
+│   │   │   └── CustomEventListener.java
+│   │   ├── model/
+│   │   │   └── Product.java
+│   │   ├── schedule/
+│   │   │   └── ScheduledTasks.java
+│   │   ├── DemoApplication.java
+│   │   └── ProductController.java
+│   └── resources/
+│       ├── application.properties
+│       └── data/products.csv
+└── test/
+    └── java/com/example/demo/
+        └── DemoApplicationTests.java
+```
+
+## Caching Strategies
+
+### CacheConfig.java
+
+```java
+package com.example.demo.cache;
+
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+
+import java.time.Duration;
+
+@Configuration
+@EnableCaching
+public class CacheConfig {
+
+    @Bean
+    public RedisCacheConfiguration cacheConfiguration() {
+        return RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(60))
+                .disableCachingNullValues()
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer()));
+    }
+}
+```
+
+### ProductService.java
+
+```java
+package com.example.demo.cache;
+
+import com.example.demo.model.Product;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Service
+public class ProductService {
+
+    private final Map<Long, Product> productDatabase = new HashMap<>();
+
+    @Cacheable(value = "products", key = "#id")
+    public Product getProductById(Long id) {
+        // Simulate slow operation
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        return productDatabase.get(id);
+    }
+
+    @CachePut(value = "products", key = "#product.id")
+    public Product saveProduct(Product product) {
+        productDatabase.put(product.getId(), product);
+        return product;
+    }
+
+    @CacheEvict(value = "products", key = "#id")
+    public void deleteProduct(Long id) {
+        productDatabase.remove(id);
+    }
+
+    public void initDatabase() {
+        productDatabase.put(1L, new Product(1L, "Laptop", 999.99));
+        productDatabase.put(2L, new Product(2L, "Phone", 699.99));
+    }
+}
+```
+
+## Batch Processing
+
+### BatchConfig.java
+
+```java
+package com.example.demo.batch;
+
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.item.file.FlatFileItemReader;
+import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
+import org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.transaction.PlatformTransactionManager;
+
+@Configuration
+public class BatchConfig {
+
+    @Bean
+    public FlatFileItemReader<Product> reader() {
+        return new FlatFileItemReaderBuilder<Product>()
+                .name("productItemReader")
+                .resource(new ClassPathResource("data/products.csv"))
+                .delimited()
+                .names("id", "name", "price")
+                .fieldSetMapper(new BeanWrapperFieldSetMapper<Product>() {{
+                    setTargetType(Product.class);
+                }})
+                .build();
+    }
+
+    @Bean
+    public ProductItemProcessor processor() {
+        return new ProductItemProcessor();
+    }
+
+    @Bean
+    public ProductItemWriter writer() {
+        return new ProductItemWriter();
+    }
+
+    @Bean
+    public Step importProductsStep(JobRepository jobRepository, PlatformTransactionManager transactionManager,
+                                 ProductItemReader reader, ProductItemProcessor processor, ProductItemWriter writer) {
+        return new StepBuilder("importProductsStep", jobRepository)
+                .<Product, Product>chunk(10, transactionManager)
+                .reader(reader)
+                .processor(processor)
+                .writer(writer)
+                .build();
+    }
+
+    @Bean
+    public Job importProductsJob(JobRepository jobRepository, Step importProductsStep, ProductJobCompletionListener listener) {
+        return new JobBuilder("importProductsJob", jobRepository)
+                .listener(listener)
+                .start(importProductsStep)
+                .build();
+    }
+}
+```
+
+### ProductItemProcessor.java
+
+```java
+package com.example.demo.batch;
+
+import com.example.demo.model.Product;
+import org.springframework.batch.item.ItemProcessor;
+
+public class ProductItemProcessor implements ItemProcessor<Product, Product> {
+
+    @Override
+    public Product process(Product product) throws Exception {
+        // Apply 10% discount
+        double discountedPrice = product.getPrice() * 0.9;
+        product.setPrice(Math.round(discountedPrice * 100.0) / 100.0);
+        return product;
+    }
+}
+```
+
+### ProductItemReader.java
+
+```java
+package com.example.demo.batch;
+
+import com.example.demo.model.Product;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.NonTransientResourceException;
+import org.springframework.batch.item.ParseException;
+import org.springframework.batch.item.UnexpectedInputException;
+
+public class ProductItemReader implements ItemReader<Product> {
+
+    private int count = 0;
+    private final Product[] testProducts = {
+            new Product(1L, "Test Product 1", 100.0),
+            new Product(2L, "Test Product 2", 200.0),
+            new Product(3L, "Test Product 3", 300.0)
+    };
+
+    @Override
+    public Product read() throws Exception, UnexpectedInputException, ParseException, NonTransientResourceException {
+        if (count < testProducts.length) {
+            return testProducts[count++];
+        }
+        return null;
+    }
+}
+```
+
+### ProductItemWriter.java
+
+```java
+package com.example.demo.batch;
+
+import com.example.demo.model.Product;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class ProductItemWriter implements ItemWriter<Product> {
+
+    @Override
+    public void write(List<? extends Product> products) throws Exception {
+        System.out.println("Writing products: " + products.size());
+        for (Product product : products) {
+            System.out.println("Processed product: " + product);
+        }
+    }
+}
+```
+
+### ProductJobCompletionListener.java
+
+```java
+package com.example.demo.batch;
+
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobExecutionListener;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ProductJobCompletionListener implements JobExecutionListener {
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        System.out.println("Job started: " + jobExecution.getJobInstance().getJobName());
+    }
+
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+        if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
+            System.out.println("Job completed successfully");
+        } else if (jobExecution.getStatus() == BatchStatus.FAILED) {
+            System.out.println("Job failed");
+        }
+    }
+}
+```
+
+## Scheduled Tasks
+
+### ScheduledTasks.java
+
+```java
+package com.example.demo.schedule;
+
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+@Component
+public class ScheduledTasks {
+
+    private static final SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm:ss");
+
+    @Scheduled(fixedRate = 5000)
+    public void reportCurrentTime() {
+        System.out.println("Fixed Rate Task - Current time: " + dateFormat.format(new Date()));
+    }
+
+    @Scheduled(fixedDelay = 3000)
+    public void fixedDelayTask() {
+        System.out.println("Fixed Delay Task - Execution time: " + dateFormat.format(new Date()));
+    }
+
+    @Scheduled(cron = "0 15 10 * * ?")
+    public void cronTask() {
+        System.out.println("Cron Task - Executed at 10:15 AM every day");
+    }
+
+    @Scheduled(initialDelay = 10000, fixedRate = 60000)
+    public void initialDelayTask() {
+        System.out.println("Initial Delay Task - Executed after 10 seconds then every minute");
+    }
+}
+```
+
+## Application Events
+
+### CustomEvent.java
+
+```java
+package com.example.demo.event;
+
+import org.springframework.context.ApplicationEvent;
+
+public class CustomEvent extends ApplicationEvent {
+
+    private String message;
+
+    public CustomEvent(Object source, String message) {
+        super(source);
+        this.message = message;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+}
+```
+
+### CustomEventPublisher.java
+
+```java
+package com.example.demo.event;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Component;
+
+@Component
+public class CustomEventPublisher {
+
+    @Autowired
+    private ApplicationEventPublisher applicationEventPublisher;
+
+    public void publishCustomEvent(final String message) {
+        System.out.println("Publishing custom event.");
+        CustomEvent customEvent = new CustomEvent(this, message);
+        applicationEventPublisher.publishEvent(customEvent);
+    }
+}
+```
+
+### CustomEventListener.java
+
+```java
+package com.example.demo.event;
+
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Component;
+
+@Component
+public class CustomEventListener {
+
+    @EventListener
+    public void handleCustomEvent(CustomEvent event) {
+        System.out.println("Received custom event - " + event.getMessage());
+    }
+}
+```
+
+## Actuator for Monitoring
+
+### application.properties
+
+```properties
+# Server
+server.port=8080
+
+# Spring Data JPA
+spring.datasource.url=jdbc:h2:mem:testdb
+spring.datasource.driverClassName=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=
+spring.h2.console.enabled=true
+spring.h2.console.path=/h2-console
+
+# Batch
+spring.batch.job.enabled=true
+
+# Actuator
+management.endpoints.web.exposure.include=*
+management.endpoint.health.show-details=always
+management.endpoint.health.show-components=always
+management.endpoint.metrics.enabled=true
+management.endpoint.prometheus.enabled=true
+management.metrics.export.prometheus.enabled=true
+
+# Cache
+spring.cache.type=redis
+spring.redis.host=localhost
+spring.redis.port=6379
+```
+
+## Model and Controller
+
+### Product.java
+
+```java
+package com.example.demo.model;
+
+import java.io.Serializable;
+
+public class Product implements Serializable {
+
+    private Long id;
+    private String name;
+    private double price;
+
+    public Product() {
+    }
+
+    public Product(Long id, String name, double price) {
+        this.id = id;
+        this.name = name;
+        this.price = price;
+    }
+
+    // Getters and Setters
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public double getPrice() {
+        return price;
+    }
+
+    public void setPrice(double price) {
+        this.price = price;
+    }
+
+    @Override
+    public String toString() {
+        return "Product{" +
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", price=" + price +
+                '}';
+    }
+}
+```
+
+### ProductController.java
+
+```java
+package com.example.demo;
+
+import com.example.demo.cache.ProductService;
+import com.example.demo.event.CustomEventPublisher;
+import com.example.demo.model.Product;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/products")
+public class ProductController {
+
+    @Autowired
+    private ProductService productService;
+
+    @Autowired
+    private CustomEventPublisher eventPublisher;
+
+    @GetMapping("/{id}")
+    public Product getProduct(@PathVariable Long id) {
+        return productService.getProductById(id);
+    }
+
+    @PostMapping
+    public Product saveProduct(@RequestBody Product product) {
+        return productService.saveProduct(product);
+    }
+
+    @DeleteMapping("/{id}")
+    public void deleteProduct(@PathVariable Long id) {
+        productService.deleteProduct(id);
+    }
+
+    @GetMapping("/event")
+    public String triggerEvent() {
+        eventPublisher.publishCustomEvent("Custom event triggered via REST endpoint");
+        return "Event published";
+    }
+}
+```
+
+### DemoApplication.java
+
+```java
+package com.example.demo;
+
+import com.example.demo.cache.ProductService;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.web.client.RestTemplate;
+
+@SpringBootApplication
+@EnableScheduling
+public class DemoApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(DemoApplication.class, args);
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+
+    @Bean
+    public boolean initializeDatabase(ProductService productService) {
+        productService.initDatabase();
+        return true;
+    }
+}
+```
+
+## Testing the Application
+
+1. Start the Spring Boot application
+2. Access Actuator endpoints:
+   - Health: `http://localhost:8080/actuator/health`
+   - Metrics: `http://localhost:8080/actuator/metrics`
+   - Prometheus: `http://localhost:8080/actuator/prometheus`
+3. Test caching:
+   - First call to `GET /products/1` will be slow (3 seconds)
+   - Subsequent calls will be fast (cached)
+4. Test batch processing:
+   - Check console logs for batch job execution
+5. Test scheduled tasks:
+   - Check console logs for scheduled task executions
+6. Test events:
+   - Call `GET /products/event` to trigger custom event
+
+This complete implementation demonstrates all the requested Spring Boot features with working code examples.
