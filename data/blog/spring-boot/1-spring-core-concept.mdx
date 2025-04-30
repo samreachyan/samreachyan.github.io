@@ -1,0 +1,2752 @@
+---
+title: '1 - Spring Core Concepts: Detailed Guide'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'Spring boot tutorial - core concept'
+authors: ['default']
+---
+
+Spring Core forms the foundation of the entire Spring ecosystem. Mastering these fundamental concepts is crucial before diving into more advanced Spring frameworks like Spring Boot, Spring MVC, or Spring Data.
+
+## 1. Inversion of Control (IoC)
+
+**Description:** IoC is a design principle where control over object creation and lifecycle is transferred from your application code to an external container (the Spring IoC container).
+
+**Real-World Application:** IoC reduces coupling between components, making your code more modular, testable, and maintainable. In enterprise applications, this leads to cleaner architecture and easier extensions.
+
+**Example Code:**
+
+Without IoC:
+
+```java
+public class OrderService {
+    private PaymentProcessor paymentProcessor;
+
+    public OrderService() {
+        // Tight coupling - OrderService creates its own dependency
+        this.paymentProcessor = new CreditCardProcessor();
+    }
+
+    public void processOrder(Order order) {
+        // Process order using payment processor
+        paymentProcessor.processPayment(order.getAmount());
+    }
+}
+```
+
+With IoC:
+
+```java
+public class OrderService {
+    private PaymentProcessor paymentProcessor;
+
+    // Dependencies are provided from outside (injected)
+    public OrderService(PaymentProcessor paymentProcessor) {
+        this.paymentProcessor = paymentProcessor;
+    }
+
+    public void processOrder(Order order) {
+        paymentProcessor.processPayment(order.getAmount());
+    }
+}
+```
+
+**Resources:**
+
+- [Spring IoC Container Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#beans)
+- [Understanding Inversion of Control](https://www.baeldung.com/inversion-control-and-dependency-injection-in-spring)
+- [IoC Container and Beans Tutorial](https://www.tutorialspoint.com/spring/spring_ioc_containers.htm)
+
+## 2. Dependency Injection (DI)
+
+**Description:** Dependency Injection is an implementation of IoC where dependencies are "injected" into objects rather than having the objects create or find their dependencies.
+
+**Real-World Application:** DI allows for flexible component configuration and easier unit testing by substituting real implementations with mocks or stubs.
+
+**Types of Dependency Injection:**
+
+### 2.1 Constructor Injection
+
+```java
+@Component
+public class ProductService {
+    private final ProductRepository productRepository;
+    private final PricingService pricingService;
+
+    // Dependencies injected through constructor
+    @Autowired
+    public ProductService(ProductRepository productRepository,
+                         PricingService pricingService) {
+        this.productRepository = productRepository;
+        this.pricingService = pricingService;
+    }
+
+    public Product getProductWithPrice(Long id) {
+        Product product = productRepository.findById(id).orElseThrow();
+        BigDecimal price = pricingService.calculatePrice(product);
+        product.setPrice(price);
+        return product;
+    }
+}
+```
+
+### 2.2 Setter Injection
+
+```java
+@Component
+public class CustomerService {
+    private NotificationService notificationService;
+
+    // Optional dependency injected through setter
+    @Autowired
+    public void setNotificationService(NotificationService notificationService) {
+        this.notificationService = notificationService;
+    }
+
+    public void register(Customer customer) {
+        // Register customer logic
+
+        if (notificationService != null) {
+            notificationService.sendWelcomeMessage(customer);
+        }
+    }
+}
+```
+
+### 2.3 Field Injection
+
+```java
+@Component
+public class OrderProcessor {
+    // Dependency injected directly into field
+    @Autowired
+    private InventoryService inventoryService;
+
+    @Autowired
+    private ShippingService shippingService;
+
+    public void processOrder(Order order) {
+        // Check inventory
+        boolean inStock = inventoryService.checkStock(order.getItems());
+        if (inStock) {
+            // Arrange shipping
+            shippingService.shipOrder(order);
+        }
+    }
+}
+```
+
+**Resources:**
+
+- [Spring Dependency Injection Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#beans-dependencies)
+- [Different Types of DI in Spring](https://www.baeldung.com/spring-dependency-injection)
+- [Constructor vs Setter Injection](https://www.vojtechruzicka.com/field-dependency-injection-considered-harmful/)
+
+## 3. Spring Beans and Bean Lifecycle
+
+**Description:** Beans are objects that are instantiated, assembled, and managed by the Spring IoC container. Understanding their lifecycle helps with proper resource management.
+
+**Real-World Application:** Bean lifecycle hooks allow you to properly initialize resources (database connections, external services) and clean them up when no longer needed.
+
+### 3.1 Bean Declaration
+
+#### Java-based Configuration:
+
+```java
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public UserService userService() {
+        return new UserServiceImpl();
+    }
+
+    @Bean
+    public DataSource dataSource() {
+        BasicDataSource dataSource = new BasicDataSource();
+        dataSource.setDriverClassName("org.postgresql.Driver");
+        dataSource.setUrl("jdbc:postgresql://localhost:5432/mydb");
+        dataSource.setUsername("user");
+        dataSource.setPassword("password");
+        return dataSource;
+    }
+
+    @Bean
+    public UserRepository userRepository(DataSource dataSource) {
+        UserRepositoryImpl repository = new UserRepositoryImpl();
+        repository.setDataSource(dataSource);
+        return repository;
+    }
+}
+```
+
+#### XML-based Configuration:
+
+```xml
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                          http://www.springframework.org/schema/beans/spring-beans.xsd">
+
+    <bean id="userService" class="com.example.service.UserServiceImpl" />
+
+    <bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close">
+        <property name="driverClassName" value="org.postgresql.Driver" />
+        <property name="url" value="jdbc:postgresql://localhost:5432/mydb" />
+        <property name="username" value="user" />
+        <property name="password" value="password" />
+    </bean>
+
+    <bean id="userRepository" class="com.example.repository.UserRepositoryImpl">
+        <property name="dataSource" ref="dataSource" />
+    </bean>
+</beans>
+```
+
+#### Component Scanning:
+
+```java
+@Component
+public class ProductService {
+    // Spring will automatically create a bean of this class
+}
+
+@Configuration
+@ComponentScan("com.example.myapp")
+public class AppConfig {
+    // This will scan for @Component, @Service, @Repository, @Controller classes
+}
+```
+
+### 3.2 Bean Lifecycle
+
+```java
+@Component
+public class DatabaseService implements InitializingBean, DisposableBean {
+
+    private Connection connection;
+
+    // Method 1: Using InitializingBean interface
+    @Override
+    public void afterPropertiesSet() throws Exception {
+        System.out.println("InitializingBean's afterPropertiesSet() method called");
+        // Initialize resources
+    }
+
+    // Method 2: Using DisposableBean interface
+    @Override
+    public void destroy() throws Exception {
+        System.out.println("DisposableBean's destroy() method called");
+        // Clean up resources
+    }
+
+    // Method 3: Using @PostConstruct annotation
+    @PostConstruct
+    public void init() {
+        System.out.println("@PostConstruct method called");
+        try {
+            // Establish database connection
+            connection = DriverManager.getConnection(
+                "jdbc:mysql://localhost:3306/mydb", "username", "password");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Method 4: Using @PreDestroy annotation
+    @PreDestroy
+    public void cleanup() {
+        System.out.println("@PreDestroy method called");
+        try {
+            // Close database connection
+            if (connection != null && !connection.isClosed()) {
+                connection.close();
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Method 5: Using @Bean annotation with initMethod and destroyMethod
+    // In @Configuration class:
+    /*
+    @Bean(initMethod = "customInit", destroyMethod = "customDestroy")
+    public DatabaseService databaseService() {
+        return new DatabaseService();
+    }
+    */
+
+    public void customInit() {
+        System.out.println("Custom init method called");
+    }
+
+    public void customDestroy() {
+        System.out.println("Custom destroy method called");
+    }
+}
+```
+
+**Resources:**
+
+- [Spring Bean Lifecycle Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#beans-factory-lifecycle)
+- [Guide to the Spring Bean Lifecycle](https://www.baeldung.com/spring-bean-lifecycle)
+- [Understanding Bean Scopes](https://www.baeldung.com/spring-bean-scopes)
+
+## 4. Application Contexts
+
+**Description:** An ApplicationContext is a central interface within a Spring application for providing configuration information to the application. It represents the Spring IoC container and is responsible for instantiating, configuring, and assembling beans.
+
+**Real-World Application:** Different application contexts are suitable for different types of applications. For example, web applications typically use WebApplicationContext, while standalone applications might use ClassPathXmlApplicationContext or AnnotationConfigApplicationContext.
+
+### 4.1 Types of Application Contexts
+
+```java
+// 1. ClassPathXmlApplicationContext - loads context definition from XML file in classpath
+ApplicationContext context = new ClassPathXmlApplicationContext("applicationContext.xml");
+
+// 2. FileSystemXmlApplicationContext - loads context definition from XML file in file system
+ApplicationContext context = new FileSystemXmlApplicationContext("C:/config/applicationContext.xml");
+
+// 3. AnnotationConfigApplicationContext - loads context definition from Java-based configuration
+ApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+
+// 4. WebApplicationContext - for web applications
+// Usually configured in web.xml or WebApplicationInitializer
+```
+
+### 4.2 Using Application Context
+
+```java
+// Creating a context
+ApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+
+// Getting a bean
+UserService userService = context.getBean(UserService.class);
+// or
+UserService userService = context.getBean("userService", UserService.class);
+
+// Using the bean
+userService.createUser("john.doe@example.com", "John Doe");
+
+// Getting environment properties
+Environment env = context.getEnvironment();
+String dbUrl = env.getProperty("database.url");
+
+// Check if a bean exists
+boolean hasCacheManager = context.containsBean("cacheManager");
+
+// Get all beans of a specific type
+Map<String, UserRepository> repositories = context.getBeansOfType(UserRepository.class);
+
+// Closing the context (for standalone applications)
+((ConfigurableApplicationContext) context).close();
+```
+
+**Resources:**
+
+- [Spring Application Context Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#beans-basics)
+- [Different Types of IoC Containers](https://www.baeldung.com/spring-application-context)
+- [Web Application Context Tutorial](https://www.tutorialspoint.com/spring/spring_web_mvc_framework.htm)
+
+## 5. Configuration Styles
+
+**Description:** Spring offers multiple ways to configure your application: XML-based, annotation-based, and Java-based configuration. Modern applications typically use a combination of annotation and Java-based configuration.
+
+**Real-World Application:** Different configuration styles provide flexibility for various scenarios. For example, Java-based configuration gives type safety, while annotations reduce boilerplate code.
+
+### 5.1 XML-based Configuration
+
+```xml
+<!-- applicationContext.xml -->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                           http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context
+                           http://www.springframework.org/schema/context/spring-context.xsd">
+
+    <!-- Bean definitions -->
+    <bean id="emailService" class="com.example.EmailServiceImpl">
+        <property name="host" value="smtp.example.com"/>
+        <property name="port" value="587"/>
+    </bean>
+
+    <bean id="userService" class="com.example.UserServiceImpl">
+        <constructor-arg ref="emailService"/>
+    </bean>
+
+    <!-- Property placeholder -->
+    <context:property-placeholder location="classpath:application.properties"/>
+
+    <!-- Component scanning -->
+    <context:component-scan base-package="com.example"/>
+
+    <!-- AOP configuration -->
+    <aop:aspectj-autoproxy/>
+</beans>
+```
+
+### 5.2 Annotation-based Configuration
+
+```java
+// Enable component scanning in configuration
+@Configuration
+@ComponentScan("com.example")
+public class AppConfig {
+    // Configuration beans can be defined here
+}
+
+// Component annotations
+@Component
+public class DefaultEmailFormatter {
+    // This becomes a spring-managed bean
+}
+
+@Service
+public class UserServiceImpl implements UserService {
+    private final UserRepository userRepository;
+
+    @Autowired
+    public UserServiceImpl(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    // Service implementation
+}
+
+@Repository
+public class JpaUserRepository implements UserRepository {
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    // Repository implementation
+}
+
+@Controller
+public class UserController {
+    @Autowired
+    private UserService userService;
+
+    // Controller methods
+}
+
+// Qualifier annotation for disambiguation
+@Component
+public class UserService {
+    @Autowired
+    @Qualifier("premiumNotificationService")
+    private NotificationService notificationService;
+
+    // Note: Better to use constructor injection, this is just for demonstration
+}
+```
+
+### 5.3 Java-based Configuration
+
+```java
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:mysql://localhost:3306/mydb");
+        config.setUsername("root");
+        config.setPassword("password");
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "250");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
+        return new HikariDataSource(config);
+    }
+
+    @Bean
+    public JdbcTemplate jdbcTemplate(DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
+    @Bean
+    public TransactionManager transactionManager(DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+
+    @Bean
+    @Profile("development")
+    public EmailService devEmailService() {
+        EmailService emailService = new EmailServiceImpl();
+        // Development configuration
+        emailService.setHost("localhost");
+        return emailService;
+    }
+
+    @Bean
+    @Profile("production")
+    public EmailService prodEmailService(@Value("${email.host}") String host) {
+        EmailService emailService = new EmailServiceImpl();
+        // Production configuration
+        emailService.setHost(host);
+        return emailService;
+    }
+}
+```
+
+### 5.4 Mixing Configuration Styles
+
+```java
+@Configuration
+@ImportResource("classpath:applicationContext-legacy.xml")
+@ComponentScan(basePackages = "com.example.components")
+@PropertySource("classpath:application.properties")
+public class AppConfig {
+
+    @Value("${database.url}")
+    private String databaseUrl;
+
+    @Bean
+    public DataSource dataSource() {
+        BasicDataSource dataSource = new BasicDataSource();
+        dataSource.setUrl(databaseUrl);
+        // Other configuration
+        return dataSource;
+    }
+}
+```
+
+**Resources:**
+
+- [Spring Configuration Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#beans-java)
+- [Java-based Configuration Guide](https://www.baeldung.com/spring-java-config)
+- [Annotation-based Configuration](https://www.baeldung.com/spring-component-annotation)
+- [XML Configuration Tutorial](https://www.tutorialspoint.com/spring/spring_beans_autowiring.htm)
+
+## 6. Spring Expression Language (SpEL)
+
+**Description:** SpEL is a powerful expression language that supports querying and manipulating an object graph at runtime. It can be used in XML or annotation-based configurations.
+
+**Real-World Application:** SpEL provides dynamic resolution of values, allowing you to define complex expressions for bean properties, making your application more flexible.
+
+### 6.1 Basic SpEL Usage
+
+```java
+@Component
+public class SpELExample {
+
+    // Simple property reference
+    @Value("#{systemProperties['user.home']}")
+    private String userHome;
+
+    // Arithmetic operations
+    @Value("#{2 * 4 + 1}")
+    private int calculatedValue;
+
+    // Method invocation and string operations
+    @Value("#{'Hello'.concat(' World').toUpperCase()}")
+    private String message;
+
+    // Ternary operator
+    @Value("#{systemProperties['java.version'].startsWith('1.8') ? 'Java 8' : 'Newer Java'}")
+    private String javaVersion;
+
+    // Accessing other beans and their properties
+    @Value("#{userService.defaultPageSize}")
+    private int pageSize;
+
+    // Using logical operators
+    @Value("#{userService.active and userService.valid}")
+    private boolean userServiceStatus;
+
+    // Collection access
+    @Value("#{userService.roles[0]}")
+    private String primaryRole;
+
+    // Map access
+    @Value("#{settings['database.timeout']}")
+    private int databaseTimeout;
+
+    // Elvis operator (null-safe)
+    @Value("#{userService.defaultName ?: 'Anonymous'}")
+    private String defaultUserName;
+
+    // Regular expressions
+    @Value("#{admin.email matches '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.com'}")
+    private boolean validEmail;
+}
+```
+
+### 6.2 SpEL in XML Configuration
+
+```xml
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                          http://www.springframework.org/schema/beans/spring-beans.xsd">
+
+    <bean id="numberGuess" class="com.example.NumberGuess">
+        <property name="randomNumber" value="#{T(java.lang.Math).random() * 100.0}"/>
+    </bean>
+
+    <bean id="shapeGuess" class="com.example.ShapeGuess">
+        <property name="initialShape" value="#{numberGuess.randomNumber lt 50 ? 'circle' : 'square'}"/>
+    </bean>
+</beans>
+```
+
+### 6.3 Programmatic SpEL Usage
+
+```java
+public class SpELProgrammaticExample {
+
+    public void evaluateExpressions() {
+        // Create parser and context
+        ExpressionParser parser = new SpelExpressionParser();
+        StandardEvaluationContext context = new StandardEvaluationContext();
+
+        // Register a variable
+        context.setVariable("greeting", "Hello");
+
+        // Evaluate expressions
+        String result1 = parser.parseExpression("#greeting + ' World'").getValue(context, String.class);
+        System.out.println(result1); // Output: Hello World
+
+        // Evaluate with root object
+        User user = new User("John", "Doe", 30);
+        context.setRootObject(user);
+
+        String name = parser.parseExpression("firstName").getValue(context, String.class);
+        System.out.println(name); // Output: John
+
+        // Property assignment
+        parser.parseExpression("age").setValue(context, 31);
+        System.out.println(user.getAge()); // Output: 31
+
+        // Method invocation
+        Boolean startsWith = parser.parseExpression("firstName.startsWith('J')").getValue(context, Boolean.class);
+        System.out.println(startsWith); // Output: true
+    }
+
+    public static class User {
+        private String firstName;
+        private String lastName;
+        private int age;
+
+        public User(String firstName, String lastName, int age) {
+            this.firstName = firstName;
+            this.lastName = lastName;
+            this.age = age;
+        }
+
+        // Getters and setters
+        public String getFirstName() { return firstName; }
+        public void setFirstName(String firstName) { this.firstName = firstName; }
+        public String getLastName() { return lastName; }
+        public void setLastName(String lastName) { this.lastName = lastName; }
+        public int getAge() { return age; }
+        public void setAge(int age) { this.age = age; }
+    }
+}
+```
+
+**Resources:**
+
+- [Spring Expression Language Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#expressions)
+- [Guide to Spring Expression Language](https://www.baeldung.com/spring-expression-language)
+- [SpEL Examples](https://www.tutorialspoint.com/spring/spring_expression_language.htm)
+
+## 7. Bean Scopes
+
+**Description:** Spring beans can be defined with different scopes that control their lifecycle and visibility. Understanding the appropriate scope for your beans helps optimize resource usage.
+
+**Real-World Application:** Different bean scopes are crucial for proper application behavior. For example, using prototype scope for stateful beans or session scope for user-specific data in web applications.
+
+### 7.1 Available Bean Scopes
+
+```java
+// 1. Singleton (default) - one instance per Spring container
+@Component
+@Scope("singleton")
+public class UserRepository {
+    // Singleton implementation
+}
+
+// 2. Prototype - new instance created each time the bean is requested
+@Component
+@Scope("prototype")
+public class ShoppingCart {
+    private List<Item> items = new ArrayList<>();
+
+    public void addItem(Item item) {
+        items.add(item);
+    }
+}
+
+// 3. Request - one instance per HTTP request (web-aware ApplicationContext only)
+@Component
+@Scope(value = WebApplicationContext.SCOPE_REQUEST, proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class RequestLogger {
+    private String requestId = UUID.randomUUID().toString();
+    private List<String> logEntries = new ArrayList<>();
+
+    public void log(String entry) {
+        logEntries.add(entry);
+    }
+}
+
+// 4. Session - one instance per HTTP session (web-aware ApplicationContext only)
+@Component
+@Scope(value = WebApplicationContext.SCOPE_SESSION, proxyMode = ScopedProxyMode.INTERFACES)
+public class UserPreferences {
+    private Theme selectedTheme = Theme.DEFAULT;
+    private Language selectedLanguage = Language.ENGLISH;
+
+    // Getters and setters
+}
+
+// 5. Application - one instance per ServletContext (web-aware ApplicationContext only)
+@Component
+@Scope(WebApplicationContext.SCOPE_APPLICATION)
+public class GlobalSettings {
+    private boolean maintenanceMode = false;
+
+    // Getters and setters
+}
+
+// 6. Websocket - one instance per WebSocket session
+@Component
+@Scope(value = "websocket", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class WebSocketHandler {
+    // Implementation
+}
+```
+
+### 7.2 Working with Custom Scopes
+
+```java
+// Step 1: Define a custom scope
+public class ThreadScope implements Scope {
+    private final ThreadLocal<Map<String, Object>> threadScope = ThreadLocal.withInitial(HashMap::new);
+
+    @Override
+    public Object get(String name, ObjectFactory<?> objectFactory) {
+        Map<String, Object> scope = threadScope.get();
+        return scope.computeIfAbsent(name, k -> objectFactory.getObject());
+    }
+
+    @Override
+    public Object remove(String name) {
+        Map<String, Object> scope = threadScope.get();
+        return scope.remove(name);
+    }
+
+    @Override
+    public void registerDestructionCallback(String name, Runnable callback) {
+        // Register a destruction callback for this object
+    }
+
+    @Override
+    public Object resolveContextualObject(String key) {
+        return null;
+    }
+
+    @Override
+    public String getConversationId() {
+        return "thread";
+    }
+
+    public void clear() {
+        threadScope.remove();
+    }
+}
+
+// Step 2: Register the custom scope
+@Configuration
+public class CustomScopeConfig implements ApplicationContextAware {
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        ConfigurableListableBeanFactory beanFactory = ((ConfigurableApplicationContext) applicationContext).getBeanFactory();
+        beanFactory.registerScope("thread", new ThreadScope());
+    }
+
+    @Bean
+    public ThreadScope threadScope() {
+        return new ThreadScope();
+    }
+
+    @Bean
+    @Scope(value = "thread", proxyMode = ScopedProxyMode.TARGET_CLASS)
+    public ThreadScopedBean threadScopedBean() {
+        return new ThreadScopedBean();
+    }
+}
+
+// Step 3: Use the custom scope
+@Component
+@Scope(value = "thread", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class ThreadScopedBean {
+    private String threadName = Thread.currentThread().getName();
+
+    public String getThreadName() {
+        return threadName;
+    }
+}
+```
+
+**Resources:**
+
+- [Spring Bean Scopes Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#beans-factory-scopes)
+- [Custom Scopes Tutorial](https://www.baeldung.com/spring-custom-scope)
+- [Web Scopes Explained](https://www.baeldung.com/spring-web-scopes)
+
+## 8. Profiles
+
+**Description:** Spring Profiles allow you to register beans conditionally based on runtime environment, allowing different configurations for different environments (development, testing, production).
+
+**Real-World Application:** Profiles are essential for managing environment-specific configurations like database settings, external service endpoints, and feature flags.
+
+### 8.1 Defining and Using Profiles
+
+```java
+// Profile-specific beans
+@Configuration
+public class DataSourceConfig {
+
+    @Bean
+    @Profile("development")
+    public DataSource developmentDataSource() {
+        return new EmbeddedDatabaseBuilder()
+            .setType(EmbeddedDatabaseType.H2)
+            .addScript("schema.sql")
+            .addScript("data.sql")
+            .build();
+    }
+
+    @Bean
+    @Profile("production")
+    public DataSource productionDataSource() {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:mysql://prod-db:3306/myapp");
+        config.setUsername("prod_user");
+        config.setPassword("prod_password");
+        return new HikariDataSource(config);
+    }
+
+    @Bean
+    @Profile("test")
+    public DataSource testDataSource() {
+        return new EmbeddedDatabaseBuilder()
+            .setType(EmbeddedDatabaseType.H2)
+            .addScript("schema.sql")
+            .addScript("test-data.sql")
+            .build();
+    }
+}
+
+// Component with profile
+@Service
+@Profile("mock")
+public class MockPaymentService implements PaymentService {
+    @Override
+    public PaymentResult processPayment(PaymentRequest request) {
+        // Mock implementation
+        return new PaymentResult(true, "MOCK-" + UUID.randomUUID().toString());
+    }
+}
+
+@Service
+@Profile("!mock") // Active when "mock" profile is NOT active
+public class RealPaymentService implements PaymentService {
+    // Real implementation connecting to payment gateway
+}
+```
+
+### 8.2 Activating Profiles
+
+```java
+// Programmatically
+@Configuration
+public class AppConfig implements ApplicationContextInitializer<ConfigurableApplicationContext> {
+
+    @Override
+    public void initialize(ConfigurableApplicationContext context) {
+        ConfigurableEnvironment env = context.getEnvironment();
+
+        // Check for system properties or environment variables
+        if (env.getProperty("docker") != null) {
+            env.addActiveProfile("docker");
+        } else {
+            env.addActiveProfile("local");
+        }
+
+        // Check for custom conditions
+        if (isDevelopmentMachine()) {
+            env.addActiveProfile("development");
+        } else {
+            env.addActiveProfile("production");
+        }
+    }
+
+    private boolean isDevelopmentMachine() {
+        // Logic to determine if this is a dev machine
+        return InetAddress.getLocalHost().getHostName().contains("dev");
+    }
+}
+
+// In main method
+public static void main(String[] args) {
+    SpringApplication app = new SpringApplication(Application.class);
+    app.setAdditionalProfiles("web");
+    app.run(args);
+}
+```
+
+### 8.3 Profile Configuration Properties
+
+```java
+// In application.properties
+spring.profiles.active=development
+
+# In application-development.properties
+server.port=8080
+logging.level.root=DEBUG
+app.cache.enabled=false
+
+# In application-production.properties
+server.port=80
+logging.level.root=INFO
+app.cache.enabled=true
+```
+
+**Resources:**
+
+- [Spring Profiles Documentation](https://docs.spring.io/spring-framework/docs/current/reference/html/core.html#beans-definition-profiles)
+- [Guide to Spring Profiles](https://www.baeldung.com/spring-profiles)
+- [Profile Configuration Tutorial](https://mkyong.com/spring/spring-profiles-example/)
+
+## 9. Events and Event Handling
+
+Spring's event handling is based on the Observer design pattern. It allows components to communicate with each other without being directly coupled. This is useful for implementing cross-cutting concerns and system-wide notifications.
+
+### Types of Events
+
+Spring provides several built-in events:
+
+- `ContextRefreshedEvent`: Published when the ApplicationContext is initialized or refreshed
+- `ContextStartedEvent`: Published when the ApplicationContext is started
+- `ContextStoppedEvent`: Published when the ApplicationContext is stopped
+- `ContextClosedEvent`: Published when the ApplicationContext is closed
+- `RequestHandledEvent`: Published when an HTTP request is handled (in web applications)
+
+### Creating Custom Events
+
+```java
+// 1. Create a custom event class
+public class UserCreatedEvent extends ApplicationEvent {
+    private String username;
+
+    public UserCreatedEvent(Object source, String username) {
+        super(source);
+        this.username = username;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+}
+
+// 2. Create an event publisher
+@Component
+public class UserService {
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Autowired
+    public UserService(ApplicationEventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
+    }
+
+    public void createUser(String username) {
+        // Business logic for creating a user
+        System.out.println("User created: " + username);
+
+        // Publish the event
+        eventPublisher.publishEvent(new UserCreatedEvent(this, username));
+    }
+}
+
+// 3. Create an event listener
+@Component
+public class UserEventListener {
+
+    @EventListener
+    public void handleUserCreatedEvent(UserCreatedEvent event) {
+        System.out.println("Received user created event for: " + event.getUsername());
+        // Process the event (e.g., send welcome email, create audit log)
+    }
+}
+```
+
+### Asynchronous Events
+
+To process events asynchronously:
+
+```java
+@Configuration
+@EnableAsync
+public class AsyncConfig {
+
+    @Bean
+    public Executor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(25);
+        executor.initialize();
+        return executor;
+    }
+}
+
+@Component
+public class AsyncEventListener {
+
+    @Async
+    @EventListener
+    public void handleUserCreatedEvent(UserCreatedEvent event) {
+        // This will be executed in a separate thread
+        System.out.println("Asynchronously processing event for: " + event.getUsername());
+    }
+}
+```
+
+**Resource:** [Spring Event Documentation](https://docs.spring.io/spring-framework/reference/core/beans/context-functionality.html#context-functionality-events)
+
+## 10. Validation
+
+Spring provides a robust validation framework integrated with the Bean Validation API (JSR-380).
+
+### Bean Validation Annotations
+
+```java
+public class UserRegistrationForm {
+
+    @NotNull(message = "Username is required")
+    @Size(min = 4, max = 50, message = "Username must be between 4 and 50 characters")
+    private String username;
+
+    @NotNull(message = "Email is required")
+    @Email(message = "Email should be valid")
+    private String email;
+
+    @NotNull(message = "Password is required")
+    @Size(min = 8, message = "Password must be at least 8 characters long")
+    private String password;
+
+    @Min(value = 18, message = "Age must be at least 18")
+    private int age;
+
+    // Getters and setters
+}
+```
+
+### Validation in Service Layer
+
+```java
+@Service
+public class UserService {
+
+    private final Validator validator;
+
+    @Autowired
+    public UserService(Validator validator) {
+        this.validator = validator;
+    }
+
+    public void registerUser(UserRegistrationForm form) {
+        // Validate the form
+        Set<ConstraintViolation<UserRegistrationForm>> violations = validator.validate(form);
+
+        if (!violations.isEmpty()) {
+            // Handle validation errors
+            StringBuilder errorMessage = new StringBuilder();
+            for (ConstraintViolation<UserRegistrationForm> violation : violations) {
+                errorMessage.append(violation.getMessage()).append("; ");
+            }
+            throw new ValidationException(errorMessage.toString());
+        }
+
+        // Proceed with user registration if validation passed
+        // ...
+    }
+}
+```
+
+### Validation in Controller Layer
+
+```java
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+
+    private final UserService userService;
+
+    @Autowired
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @PostMapping("/register")
+    public ResponseEntity<?> registerUser(@Valid @RequestBody UserRegistrationForm form,
+                                        BindingResult bindingResult) {
+        if (bindingResult.hasErrors()) {
+            List<String> errors = bindingResult.getAllErrors().stream()
+                .map(DefaultMessageSourceResolvable::getDefaultMessage)
+                .collect(Collectors.toList());
+            return ResponseEntity.badRequest().body(errors);
+        }
+
+        userService.registerUser(form);
+        return ResponseEntity.ok("User registered successfully");
+    }
+}
+```
+
+**Resource:** [Spring Validation Documentation](https://docs.spring.io/spring-framework/reference/core/validation.html)
+
+## 11. Data Access with Spring
+
+Spring provides excellent support for data access technologies like JDBC, JPA, Hibernate, and more.
+
+### JDBC Template
+
+```java
+@Repository
+public class JdbcUserRepository implements UserRepository {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    public JdbcUserRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @Override
+    public User findById(Long id) {
+        return jdbcTemplate.queryForObject(
+            "SELECT id, username, email FROM users WHERE id = ?",
+            new Object[]{id},
+            (rs, rowNum) -> {
+                User user = new User();
+                user.setId(rs.getLong("id"));
+                user.setUsername(rs.getString("username"));
+                user.setEmail(rs.getString("email"));
+                return user;
+            });
+    }
+
+    @Override
+    public void save(User user) {
+        if (user.getId() == null) {
+            // Insert new user
+            jdbcTemplate.update(
+                "INSERT INTO users (username, email) VALUES (?, ?)",
+                user.getUsername(), user.getEmail());
+        } else {
+            // Update existing user
+            jdbcTemplate.update(
+                "UPDATE users SET username = ?, email = ? WHERE id = ?",
+                user.getUsername(), user.getEmail(), user.getId());
+        }
+    }
+
+    @Override
+    public List<User> findAll() {
+        return jdbcTemplate.query(
+            "SELECT id, username, email FROM users",
+            (rs, rowNum) -> {
+                User user = new User();
+                user.setId(rs.getLong("id"));
+                user.setUsername(rs.getString("username"));
+                user.setEmail(rs.getString("email"));
+                return user;
+            });
+    }
+}
+```
+
+### JPA Integration
+
+```java
+// Entity class
+@Entity
+@Table(name = "users")
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String username;
+
+    @Column(nullable = false)
+    private String email;
+
+    // Getters and setters
+}
+
+// Repository interface
+public interface UserRepository extends JpaRepository<User, Long> {
+
+    User findByUsername(String username);
+
+    List<User> findByEmailContaining(String emailFragment);
+
+    @Query("SELECT u FROM User u WHERE u.username LIKE %:keyword% OR u.email LIKE %:keyword%")
+    List<User> search(@Param("keyword") String keyword);
+}
+
+// Service class
+@Service
+@Transactional
+public class UserService {
+
+    private final UserRepository userRepository;
+
+    @Autowired
+    public UserService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    public User findById(Long id) {
+        return userRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+    }
+
+    public User createUser(User user) {
+        return userRepository.save(user);
+    }
+
+    public List<User> searchUsers(String keyword) {
+        return userRepository.search(keyword);
+    }
+}
+```
+
+**Resource:** [Spring Data Access Documentation](https://docs.spring.io/spring-framework/reference/data-access.html)
+
+## 12. Transaction Management
+
+Spring provides a consistent programming model for transaction management across different transaction APIs.
+
+### Declarative Transaction Management
+
+```java
+// Configuration class
+@Configuration
+@EnableTransactionManagement
+public class TransactionConfig {
+
+    @Bean
+    public PlatformTransactionManager transactionManager(EntityManagerFactory emf) {
+        JpaTransactionManager transactionManager = new JpaTransactionManager();
+        transactionManager.setEntityManagerFactory(emf);
+        return transactionManager;
+    }
+}
+
+// Service with transaction management
+@Service
+public class BankService {
+
+    private final AccountRepository accountRepository;
+
+    @Autowired
+    public BankService(AccountRepository accountRepository) {
+        this.accountRepository = accountRepository;
+    }
+
+    @Transactional
+    public void transfer(Long fromId, Long toId, BigDecimal amount) {
+        Account fromAccount = accountRepository.findById(fromId)
+            .orElseThrow(() -> new ResourceNotFoundException("Source account not found"));
+
+        Account toAccount = accountRepository.findById(toId)
+            .orElseThrow(() -> new ResourceNotFoundException("Target account not found"));
+
+        if (fromAccount.getBalance().compareTo(amount) < 0) {
+            throw new InsufficientFundsException("Insufficient funds in the source account");
+        }
+
+        fromAccount.setBalance(fromAccount.getBalance().subtract(amount));
+        toAccount.setBalance(toAccount.getBalance().add(amount));
+
+        accountRepository.save(fromAccount);
+        accountRepository.save(toAccount);
+
+        // If any exception occurs, the transaction will be rolled back automatically
+    }
+}
+```
+
+### Transaction Attributes
+
+```java
+@Service
+public class ProductService {
+
+    private final ProductRepository productRepository;
+    private final AuditService auditService;
+
+    @Autowired
+    public ProductService(ProductRepository productRepository, AuditService auditService) {
+        this.productRepository = productRepository;
+        this.auditService = auditService;
+    }
+
+    // Default transaction behavior
+    @Transactional
+    public Product createProduct(Product product) {
+        return productRepository.save(product);
+    }
+
+    // Read-only transaction
+    @Transactional(readOnly = true)
+    public List<Product> findAllProducts() {
+        return productRepository.findAll();
+    }
+
+    // Custom isolation level
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public void updateProductStock(Long productId, int quantity) {
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+
+        product.setStockQuantity(product.getStockQuantity() + quantity);
+        productRepository.save(product);
+    }
+
+    // Custom propagation behavior
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordProductView(Long productId) {
+        // This will always run in a new transaction
+        auditService.logProductView(productId);
+    }
+
+    // Exception handling
+    @Transactional(rollbackFor = CustomException.class,
+                  noRollbackFor = IgnorableException.class)
+    public void processProduct(Long productId) {
+        // Transaction will roll back on CustomException but not on IgnorableException
+    }
+}
+```
+
+**Resource:** [Spring Transaction Management Documentation](https://docs.spring.io/spring-framework/reference/data-access/transaction.html)
+
+## 13. Caching
+
+Spring provides a caching abstraction that can integrate with various caching solutions.
+
+### Basic Caching Configuration
+
+```java
+@Configuration
+@EnableCaching
+public class CachingConfig {
+
+    @Bean
+    public CacheManager cacheManager() {
+        SimpleCacheManager cacheManager = new SimpleCacheManager();
+        cacheManager.setCaches(Arrays.asList(
+            new ConcurrentMapCache("products"),
+            new ConcurrentMapCache("categories")
+        ));
+        return cacheManager;
+    }
+}
+```
+
+### Using Cache Annotations
+
+```java
+@Service
+public class ProductService {
+
+    private final ProductRepository productRepository;
+
+    @Autowired
+    public ProductService(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    // Cache the result of this method
+    @Cacheable(value = "products", key = "#id")
+    public Product getProductById(Long id) {
+        System.out.println("Fetching product from database: " + id);
+        return productRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+    }
+
+    // Update the cache when this method is called
+    @CachePut(value = "products", key = "#product.id")
+    public Product updateProduct(Product product) {
+        System.out.println("Updating product in database: " + product.getId());
+        return productRepository.save(product);
+    }
+
+    // Remove an item from the cache
+    @CacheEvict(value = "products", key = "#id")
+    public void deleteProduct(Long id) {
+        System.out.println("Deleting product from database: " + id);
+        productRepository.deleteById(id);
+    }
+
+    // Clear the entire cache
+    @CacheEvict(value = "products", allEntries = true)
+    public void clearProductCache() {
+        System.out.println("Clearing entire product cache");
+    }
+
+    // Conditional caching
+    @Cacheable(value = "products", condition = "#price > 1000")
+    public List<Product> findExpensiveProducts(double price) {
+        System.out.println("Fetching expensive products: " + price);
+        return productRepository.findByPriceGreaterThan(price);
+    }
+}
+```
+
+### Using Cache Manager Directly
+
+```java
+@Service
+public class ManualCacheService {
+
+    private final CacheManager cacheManager;
+
+    @Autowired
+    public ManualCacheService(CacheManager cacheManager) {
+        this.cacheManager = cacheManager;
+    }
+
+    public void manualCacheOperations(String key, Object value) {
+        Cache cache = cacheManager.getCache("products");
+        if (cache != null) {
+            // Put value into cache
+            cache.put(key, value);
+
+            // Get value from cache
+            Cache.ValueWrapper valueWrapper = cache.get(key);
+            if (valueWrapper != null) {
+                Object cachedValue = valueWrapper.get();
+                System.out.println("Cached value: " + cachedValue);
+            }
+
+            // Evict value from cache
+            cache.evict(key);
+
+            // Clear entire cache
+            cache.clear();
+        }
+    }
+}
+```
+
+**Resource:** [Spring Caching Documentation](https://docs.spring.io/spring-framework/reference/integration/cache.html)
+
+## 14. Task Execution and Scheduling
+
+Spring provides abstractions for asynchronous task execution and scheduling.
+
+### Asynchronous Task Execution
+
+```java
+@Configuration
+@EnableAsync
+public class AsyncConfig {
+
+    @Bean(name = "taskExecutor")
+    public Executor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(25);
+        executor.setThreadNamePrefix("AsyncTask-");
+        executor.initialize();
+        return executor;
+    }
+}
+
+@Service
+public class AsyncService {
+
+    private static final Logger logger = LoggerFactory.getLogger(AsyncService.class);
+
+    @Async
+    public CompletableFuture<String> asyncMethod1() {
+        logger.info("Executing asyncMethod1 in thread: {}", Thread.currentThread().getName());
+
+        try {
+            // Simulate a long-running task
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        return CompletableFuture.completedFuture("Result from asyncMethod1");
+    }
+
+    @Async("taskExecutor")
+    public Future<Integer> asyncMethod2() {
+        logger.info("Executing asyncMethod2 in thread: {}", Thread.currentThread().getName());
+
+        try {
+            // Simulate a long-running task
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        return new AsyncResult<>(42);
+    }
+
+    // Method to demonstrate how to use the async methods
+    public void performAsyncOperations() throws ExecutionException, InterruptedException {
+        logger.info("Starting asynchronous operations from thread: {}", Thread.currentThread().getName());
+
+        CompletableFuture<String> future1 = asyncMethod1();
+        Future<Integer> future2 = asyncMethod2();
+
+        // Main thread can do other work here
+
+        // Wait for results when needed
+        String result1 = future1.get();
+        Integer result2 = future2.get();
+
+        logger.info("Results: {} and {}", result1, result2);
+    }
+}
+```
+
+### Task Scheduling
+
+```java
+@Configuration
+@EnableScheduling
+public class SchedulingConfig {
+
+    @Bean
+    public TaskScheduler taskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(5);
+        scheduler.setThreadNamePrefix("ScheduledTask-");
+        return scheduler;
+    }
+}
+
+@Component
+public class ScheduledTasks {
+
+    private static final Logger logger = LoggerFactory.getLogger(ScheduledTasks.class);
+    private static final SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm:ss");
+
+    // Execute every 5 seconds
+    @Scheduled(fixedRate = 5000)
+    public void reportCurrentTime() {
+        logger.info("Fixed rate task: The time is now {}", dateFormat.format(new Date()));
+    }
+
+    // Execute every 5 seconds, with a 1-second delay after the previous execution finishes
+    @Scheduled(fixedDelay = 5000, initialDelay = 1000)
+    public void taskWithFixedDelay() {
+        logger.info("Fixed delay task: The time is now {}", dateFormat.format(new Date()));
+
+        try {
+            // Simulate a long-running task
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // Execute at a specific time using a cron expression (every day at 8:30 AM)
+    @Scheduled(cron = "0 30 8 * * ?")
+    public void scheduledTaskWithCron() {
+        logger.info("Cron task: The time is now {}", dateFormat.format(new Date()));
+    }
+}
+```
+
+**Resource:** [Spring Task Execution and Scheduling Documentation](https://docs.spring.io/spring-framework/reference/integration/scheduling.html)
+
+## 15. Testing in Spring
+
+Spring offers extensive support for unit and integration testing.
+
+### Unit Testing with JUnit and Mockito
+
+```java
+@ExtendWith(MockitoExtension.class)
+public class UserServiceTest {
+
+    @Mock
+    private UserRepository userRepository;
+
+    @InjectMocks
+    private UserService userService;
+
+    @Test
+    public void testFindUserById() {
+        // Arrange
+        Long userId = 1L;
+        User expectedUser = new User();
+        expectedUser.setId(userId);
+        expectedUser.setUsername("testuser");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(expectedUser));
+
+        // Act
+        User actualUser = userService.findById(userId);
+
+        // Assert
+        assertNotNull(actualUser);
+        assertEquals(userId, actualUser.getId());
+        assertEquals("testuser", actualUser.getUsername());
+
+        // Verify that the repository method was called
+        verify(userRepository).findById(userId);
+    }
+
+    @Test
+    public void testFindUserById_NotFound() {
+        // Arrange
+        Long userId = 1L;
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+        // Act & Assert
+        assertThrows(ResourceNotFoundException.class, () -> {
+            userService.findById(userId);
+        });
+
+        verify(userRepository).findById(userId);
+    }
+}
+```
+
+### Integration Testing with Spring Boot Test
+
+```java
+@SpringBootTest
+public class UserServiceIntegrationTest {
+
+    @Autowired
+    private UserService userService;
+
+    @MockBean
+    private UserRepository userRepository;
+
+    @Test
+    public void testCreateUser() {
+        // Arrange
+        User newUser = new User();
+        newUser.setUsername("newuser");
+        newUser.setEmail("newuser@example.com");
+
+        User savedUser = new User();
+        savedUser.setId(1L);
+        savedUser.setUsername("newuser");
+        savedUser.setEmail("newuser@example.com");
+
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+
+        // Act
+        User createdUser = userService.createUser(newUser);
+
+        // Assert
+        assertNotNull(createdUser);
+        assertEquals(1L, createdUser.getId());
+        assertEquals("newuser", createdUser.getUsername());
+
+        verify(userRepository).save(any(User.class));
+    }
+}
+```
+
+### Web Layer Testing with MockMvc
+
+```java
+@WebMvcTest(UserController.class)
+public class UserControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private UserService userService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Test
+    public void testGetUserById() throws Exception {
+        // Arrange
+        User user = new User();
+        user.setId(1L);
+        user.setUsername("testuser");
+        user.setEmail("test@example.com");
+
+        when(userService.findById(1L)).thenReturn(user);
+
+        // Act & Assert
+        mockMvc.perform(get("/api/users/1"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.id").value(1))
+            .andExpect(jsonPath("$.username").value("testuser"))
+            .andExpect(jsonPath("$.email").value("test@example.com"));
+
+        verify(userService).findById(1L);
+    }
+
+    @Test
+    public void testCreateUser() throws Exception {
+        // Arrange
+        UserRegistrationForm form = new UserRegistrationForm();
+        form.setUsername("newuser");
+        form.setEmail("newuser@example.com");
+        form.setPassword("password123");
+        form.setAge(25);
+
+        // Act & Assert
+        mockMvc.perform(post("/api/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(form)))
+            .andExpect(status().isOk())
+            .andExpect(content().string("User registered successfully"));
+
+        verify(userService).registerUser(any(UserRegistrationForm.class));
+    }
+}
+```
+
+### Data Layer Testing
+
+```java
+@DataJpaTest
+public class UserRepositoryTest {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private TestEntityManager entityManager;
+
+    @Test
+    public void testFindByUsername() {
+        // Arrange
+        User user = new User();
+        user.setUsername("testuser");
+        user.setEmail("test@example.com");
+
+        entityManager.persist(user);
+        entityManager.flush();
+
+        // Act
+        User found = userRepository.findByUsername("testuser");
+
+        // Assert
+        assertNotNull(found);
+        assertEquals("testuser", found.getUsername());
+        assertEquals("test@example.com", found.getEmail());
+    }
+
+    @Test
+    public void testFindByEmailContaining() {
+        // Arrange
+        User user1 = new User();
+        user1.setUsername("user1");
+        user1.setEmail("user1@example.com");
+
+        User user2 = new User();
+        user2.setUsername("user2");
+        user2.setEmail("user2@example.com");
+
+        User user3 = new User();
+        user3.setUsername("user3");
+        user3.setEmail("user3@othermail.com");
+
+        entityManager.persist(user1);
+        entityManager.persist(user2);
+        entityManager.persist(user3);
+        entityManager.flush();
+
+        // Act
+        List<User> exampleUsers = userRepository.findByEmailContaining("example.com");
+
+        // Assert
+        assertEquals(2, exampleUsers.size());
+        assertTrue(exampleUsers.stream().anyMatch(u -> "user1".equals(u.getUsername())));
+        assertTrue(exampleUsers.stream().anyMatch(u -> "user2".equals(u.getUsername())));
+    }
+}
+```
+
+**Resource:** [Spring Testing Documentation](https://docs.spring.io/spring-framework/reference/testing.html)
+
+## 16. Aspect-Oriented Programming (AOP)
+
+Spring AOP provides a framework for implementing cross-cutting concerns.
+
+### Basic AOP Configuration
+
+```java
+@Configuration
+@EnableAspectJAutoProxy
+public class AopConfig {
+    // Configuration for AOP
+}
+```
+
+### Creating Aspects
+
+```java
+@Aspect
+@Component
+public class LoggingAspect {
+
+    private static final Logger logger = LoggerFactory.getLogger(LoggingAspect.class);
+
+    // Pointcut definition
+    @Pointcut("execution(* com.example.service.*.*(..))")
+    public void serviceMethods() {}
+
+    // Advice to execute before the targeted methods
+    @Before("serviceMethods()")
+    public void logBefore(JoinPoint joinPoint) {
+        String methodName = joinPoint.getSignature().getName();
+        String className = joinPoint.getTarget().getClass().getSimpleName();
+        logger.info("Before executing: {}#{}", className, methodName);
+    }
+
+    // Advice to execute after the targeted methods return
+    @AfterReturning(pointcut = "serviceMethods()", returning = "result")
+    public void logAfterReturning(JoinPoint joinPoint, Object result) {
+        String methodName = joinPoint.getSignature().getName();
+        String className = joinPoint.getTarget().getClass().getSimpleName();
+        logger.info("{}#{} returned: {}", className, methodName, result);
+    }
+
+    // Advice to execute when the targeted methods throw exceptions
+    @AfterThrowing(pointcut = "serviceMethods()", throwing = "ex")
+    public void logAfterThrowing(JoinPoint joinPoint, Exception ex) {
+        String methodName = joinPoint.getSignature().getName();
+        String className = joinPoint.getTarget().getClass().getSimpleName();
+        logger.error("Exception in {}#{}: {}", className, methodName, ex.getMessage());
+    }
+
+    // Advice to execute around the targeted methods
+    @Around("serviceMethods()")
+    public Object logAround(ProceedingJoinPoint joinPoint) throws Throwable {
+        String methodName = joinPoint.getSignature().getName();
+        String className = joinPoint.getTarget().getClass().getSimpleName();
+
+        logger.info("Around advice - Before {}#{}", className, methodName);
+
+        long startTime = System.currentTimeMillis();
+
+        try {
+            // Proceed with the method execution
+            Object result = joinPoint.proceed();
+
+            long executionTime = System.currentTimeMillis() - startTime;
+            logger.info("Around advice - After {}#{}, execution time: {} ms",
+                       className, methodName, executionTime);
+
+            return result;
+        } catch (Throwable ex) {
+            logger.error("Around advice - Exception in {}#{}: {}",
+                       className, methodName, ex.getMessage());
+            throw ex;
+        }
+    }
+}
+```
+
+### Custom Annotations for AOP
+
+```java
+// Custom annotation
+@Target({ElementType.METHOD, ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+public @interface LogExecutionTime {
+}
+
+// Custom aspect for the annotation
+@Aspect
+@Component
+public class ExecutionTimeAspect {
+
+    private static final Logger logger = LoggerFactory.getLogger(ExecutionTimeAspect.class);
+
+    @Around("@annotation(LogExecutionTime)")
+    public Object logExecutionTime(ProceedingJoinPoint joinPoint) throws Throwable {
+        long startTime = System.currentTimeMillis();
+
+        Object result = joinPoint.proceed();
+
+        long executionTime = System.currentTimeMillis() - startTime;
+        logger.info("{}#{} executed in {} ms",
+                   joinPoint.getTarget().getClass().getSimpleName(),
+                   joinPoint.getSignature().getName(),
+                   executionTime);
+
+        return result;
+    }
+}
+
+// Using the custom annotation
+@Service
+public class SampleService {
+
+    @LogExecutionTime
+    public void performLongOperation() {
+        // Some time-consuming operation
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+```
+
+**Resource:** [Spring AOP Documentation](https://docs.spring.io/spring-framework/reference/core/aop.html)
+
+## 17. Internationalization (i18n)
+
+Spring provides support for internationalizing applications.
+
+### Basic i18n Configuration
+
+```java
+@Configuration
+public class InternationalizationConfig {
+
+    @Bean
+    public MessageSource messageSource() {
+        ResourceBundleMessageSource messageSource = new ResourceBundleMessageSource();
+        messageSource.setBasenames("messages");
+        messageSource.setDefaultEncoding("UTF-8");
+        return messageSource;
+    }
+
+    @Bean
+    public LocaleResolver localeResolver() {
+        AcceptHeaderLocaleResolver localeResolver = new AcceptHeaderLocaleResolver();
+        localeResolver.setDefaultLocale(Locale.US);
+        return localeResolver;
+    }
+}
+```
+
+### Message Resource Files
+
+````properties
+# messages_en.properties (English)
+greeting=Hello
+welcome.message=Welcome to our application, {0}!
+validation.username.required=Username is required
+validation.email.required=Email is required
+product.outOfStock=The product is out of stock
+error.general=An error occurred. Please try again later
+
+# messages_es.properties (Spanish)
+greeting=Hola
+welcome.message=Bienvenido a nuestra aplicación, {0}!
+validation.username.required=El nombre de usuario es obligatorio
+validation.email.required=El correo electrónico es obligatorio
+product.outOfStock=El producto está agotado
+error.general=Se produjo un error. Por favor, inténtelo de nuevo más tarde
+
+# messages_fr.properties (French)
+greeting=Bonjour
+welcome.message=Bienvenue dans notre application, {0}!
+validation.username.required=Le nom d'utilisateur est requis
+validation.email.required=L'e-mail est requis
+product.outOfStock=Le produit est en rupture de stock
+error.general=Une erreur s'est produite. Veuillez réessayer plus tard
+
+### Using Message Sources in Code
+
+```java
+@Service
+public class InternationalizedService {
+
+    private final MessageSource messageSource;
+
+    @Autowired
+    public InternationalizedService(MessageSource messageSource) {
+        this.messageSource = messageSource;
+    }
+
+    public String getGreeting(Locale locale) {
+        return messageSource.getMessage("greeting", null, locale);
+    }
+
+    public String getWelcomeMessage(String username, Locale locale) {
+        return messageSource.getMessage("welcome.message", new Object[]{username}, locale);
+    }
+
+    public String getErrorMessage(String errorKey, Locale locale) {
+        // Using default message in case the key is not found
+        return messageSource.getMessage(errorKey, null, "Unknown error", locale);
+    }
+}
+
+@RestController
+@RequestMapping("/api/i18n")
+public class I18nController {
+
+    private final InternationalizedService service;
+
+    @Autowired
+    public I18nController(InternationalizedService service) {
+        this.service = service;
+    }
+
+    @GetMapping("/greeting")
+    public String getGreeting(Locale locale) {
+        return service.getGreeting(locale);
+    }
+
+    @GetMapping("/welcome")
+    public String getWelcome(@RequestParam String username, Locale locale) {
+        return service.getWelcomeMessage(username, locale);
+    }
+}
+````
+
+### Locale Resolution in Web Applications
+
+```java
+@Configuration
+public class WebInternationalizationConfig {
+
+    @Bean
+    public LocaleResolver localeResolver() {
+        // Use cookies to store the user's locale preference
+        CookieLocaleResolver resolver = new CookieLocaleResolver();
+        resolver.setCookieName("locale");
+        resolver.setCookieMaxAge(Duration.ofDays(30));
+        resolver.setDefaultLocale(Locale.US);
+        return resolver;
+    }
+
+    @Bean
+    public LocaleChangeInterceptor localeChangeInterceptor() {
+        // Allow users to change locale by passing a parameter in the URL
+        LocaleChangeInterceptor interceptor = new LocaleChangeInterceptor();
+        interceptor.setParamName("lang");
+        return interceptor;
+    }
+
+    @Bean
+    public WebMvcConfigurer webMvcConfigurer() {
+        return new WebMvcConfigurer() {
+            @Override
+            public void addInterceptors(InterceptorRegistry registry) {
+                registry.addInterceptor(localeChangeInterceptor());
+            }
+        };
+    }
+}
+```
+
+**Resource:** [Spring Internationalization Documentation](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-localeresolver.html)
+
+## 18. Messaging with Spring Integration
+
+Spring provides support for enterprise integration patterns and message-based applications.
+
+### Basic Integration Configuration
+
+```java
+@Configuration
+@EnableIntegration
+public class IntegrationConfig {
+
+    @Bean
+    public MessageChannel inputChannel() {
+        return new DirectChannel();
+    }
+
+    @Bean
+    public MessageChannel outputChannel() {
+        return new DirectChannel();
+    }
+
+    @Bean
+    public IntegrationFlow integrationFlow() {
+        return IntegrationFlows.from(inputChannel())
+            .filter(Message.class, msg -> msg.getPayload() != null)
+            .transform(Message.class, this::transformMessage)
+            .handle(this::processMessage)
+            .channel(outputChannel())
+            .get();
+    }
+
+    private String transformMessage(Message<?> message) {
+        String payload = (String) message.getPayload();
+        return payload.toUpperCase();
+    }
+
+    private void processMessage(String payload) {
+        System.out.println("Processing message: " + payload);
+    }
+}
+```
+
+### Message Endpoints
+
+```java
+@Component
+public class OrderProcessor {
+
+    private final Logger logger = LoggerFactory.getLogger(OrderProcessor.class);
+
+    @ServiceActivator(inputChannel = "ordersChannel")
+    public Order processOrder(Order order) {
+        logger.info("Processing order: {}", order.getId());
+
+        // Do some processing on the order
+        order.setStatus("PROCESSING");
+        order.setProcessedTimestamp(new Date());
+
+        return order;
+    }
+
+    @Transformer(inputChannel = "newOrdersChannel", outputChannel = "validatedOrdersChannel")
+    public Order validateOrder(Order order) {
+        logger.info("Validating order: {}", order.getId());
+
+        if (order.getItems() == null || order.getItems().isEmpty()) {
+            throw new IllegalArgumentException("Order must have at least one item");
+        }
+
+        order.setValidated(true);
+        return order;
+    }
+
+    @Router(inputChannel = "routingChannel")
+    public String routeOrder(Order order) {
+        if (order.getTotalAmount() > 1000) {
+            return "highValueOrdersChannel";
+        } else {
+            return "regularOrdersChannel";
+        }
+    }
+
+    @Splitter(inputChannel = "batchOrdersChannel", outputChannel = "individualOrdersChannel")
+    public List<Order> splitBatchOrder(BatchOrder batchOrder) {
+        logger.info("Splitting batch order: {}", batchOrder.getId());
+        return batchOrder.getOrders();
+    }
+
+    @Aggregator(inputChannel = "orderItemsChannel", outputChannel = "completeOrdersChannel")
+    public Order aggregateOrderItems(List<OrderItem> orderItems) {
+        logger.info("Aggregating order items");
+
+        if (orderItems.isEmpty()) {
+            return null;
+        }
+
+        // Assuming all items belong to the same order
+        String orderId = orderItems.get(0).getOrderId();
+
+        Order order = new Order();
+        order.setId(orderId);
+        order.setItems(orderItems);
+        order.setTotalAmount(
+            orderItems.stream()
+                .mapToDouble(item -> item.getPrice() * item.getQuantity())
+                .sum()
+        );
+
+        return order;
+    }
+}
+```
+
+### Message Channels
+
+```java
+@Configuration
+public class ChannelConfig {
+
+    @Bean
+    public MessageChannel directChannel() {
+        return new DirectChannel(); // Point-to-point, synchronous
+    }
+
+    @Bean
+    public MessageChannel queueChannel() {
+        return new QueueChannel(10); // Point-to-point, asynchronous with a bounded queue
+    }
+
+    @Bean
+    public MessageChannel priorityChannel() {
+        return new PriorityChannel(10); // Like QueueChannel, but with message priority
+    }
+
+    @Bean
+    public MessageChannel publishSubscribeChannel() {
+        return new PublishSubscribeChannel(); // Broadcast to multiple subscribers
+    }
+
+    @Bean
+    public MessageChannel executorChannel() {
+        ExecutorChannel channel = new ExecutorChannel(Executors.newFixedThreadPool(5));
+        return channel; // Asynchronous with a thread pool
+    }
+}
+```
+
+### Message Gateways
+
+```java
+// Define a gateway interface
+@MessagingGateway(defaultRequestChannel = "ordersInputChannel")
+public interface OrderGateway {
+
+    // Send an order and receive a confirmation
+    Future<OrderConfirmation> submitOrder(Order order);
+
+    // Send an order, no response expected
+    @Gateway(requestChannel = "oneWayOrderChannel")
+    void submitOrderOneWay(Order order);
+
+    // Send an order and receive response with headers
+    @Gateway(requestChannel = "headersOrderChannel")
+    Message<OrderConfirmation> submitOrderWithHeaders(@Header("customerId") String customerId,
+                                                   @Payload Order order);
+}
+
+// Using the gateway
+@Service
+public class OrderService {
+
+    private final OrderGateway orderGateway;
+
+    @Autowired
+    public OrderService(OrderGateway orderGateway) {
+        this.orderGateway = orderGateway;
+    }
+
+    public OrderConfirmation placeOrder(Order order) throws ExecutionException, InterruptedException {
+        // The gateway will publish the message to the channel and return a Future
+        Future<OrderConfirmation> future = orderGateway.submitOrder(order);
+
+        // We can wait for the response
+        return future.get();
+    }
+}
+```
+
+**Resource:** [Spring Integration Documentation](https://docs.spring.io/spring-integration/reference/html/)
+
+## 19. Spring Boot Actuator
+
+Spring Boot Actuator provides production-ready features for monitoring and managing your application.
+
+### Basic Actuator Configuration
+
+```java
+// In application.properties or application.yml
+/*
+# Enable all actuator endpoints
+management.endpoints.web.exposure.include=*
+
+# Enable specific endpoints only
+management.endpoints.web.exposure.include=health,info,metrics,loggers
+
+# Disable specific endpoints
+management.endpoints.web.exposure.exclude=env,beans
+
+# Health endpoint configuration
+management.endpoint.health.show-details=always
+
+# Info endpoint configuration
+management.info.env.enabled=true
+info.app.name=My Spring Application
+info.app.description=A sample Spring Boot application
+info.app.version=1.0.0
+*/
+
+@Configuration
+public class ActuatorConfig {
+
+    @Bean
+    public HealthIndicator customHealthIndicator() {
+        return new HealthIndicator() {
+            @Override
+            public Health health() {
+                return Health.up()
+                    .withDetail("customHealth", "Everything is working fine!")
+                    .build();
+            }
+        };
+    }
+
+    @Bean
+    public InfoContributor customInfoContributor() {
+        return builder -> {
+            Map<String, Object> details = new HashMap<>();
+            details.put("serverTime", new Date());
+            details.put("environment", System.getProperty("spring.profiles.active"));
+            builder.withDetail("custom", details);
+        };
+    }
+}
+```
+
+### Custom Actuator Endpoints
+
+```java
+@Component
+@Endpoint(id = "custom")
+public class CustomEndpoint {
+
+    @ReadOperation
+    public Map<String, Object> customEndpoint() {
+        Map<String, Object> details = new HashMap<>();
+        details.put("timestamp", new Date());
+        details.put("message", "Custom endpoint details");
+
+        // Add application-specific details
+        Runtime runtime = Runtime.getRuntime();
+        details.put("memory", Map.of(
+            "free", runtime.freeMemory(),
+            "total", runtime.totalMemory(),
+            "max", runtime.maxMemory()
+        ));
+
+        return details;
+    }
+
+    @ReadOperation
+    public String customEndpointWithParams(@Selector String param) {
+        return "Custom endpoint with param: " + param;
+    }
+
+    @WriteOperation
+    public void updateSomething(@Selector String name, String value) {
+        // Update some application state
+        System.out.println("Updated " + name + " to " + value);
+    }
+}
+```
+
+### Custom Health Indicators
+
+```java
+@Component
+public class DatabaseHealthIndicator implements HealthIndicator {
+
+    private final DataSource dataSource;
+
+    @Autowired
+    public DatabaseHealthIndicator(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+
+    @Override
+    public Health health() {
+        try (Connection conn = dataSource.getConnection()) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("SELECT 1"); // Simple query to verify DB connection
+
+                return Health.up()
+                    .withDetail("database", conn.getMetaData().getDatabaseProductName())
+                    .withDetail("version", conn.getMetaData().getDatabaseProductVersion())
+                    .build();
+            }
+        } catch (SQLException ex) {
+            return Health.down()
+                .withDetail("error", ex.getMessage())
+                .build();
+        }
+    }
+}
+
+@Component
+public class ExternalServiceHealthIndicator implements HealthIndicator {
+
+    private final RestTemplate restTemplate;
+    private final String serviceUrl;
+
+    @Autowired
+    public ExternalServiceHealthIndicator(RestTemplate restTemplate,
+                                        @Value("${external.service.url}") String serviceUrl) {
+        this.restTemplate = restTemplate;
+        this.serviceUrl = serviceUrl;
+    }
+
+    @Override
+    public Health health() {
+        try {
+            ResponseEntity<String> response = restTemplate.getForEntity(serviceUrl + "/health", String.class);
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                return Health.up()
+                    .withDetail("status", response.getStatusCode())
+                    .withDetail("response", response.getBody())
+                    .build();
+            } else {
+                return Health.down()
+                    .withDetail("status", response.getStatusCode())
+                    .withDetail("response", response.getBody())
+                    .build();
+            }
+        } catch (Exception ex) {
+            return Health.down()
+                .withDetail("error", ex.getMessage())
+                .build();
+        }
+    }
+}
+```
+
+**Resource:** [Spring Boot Actuator Documentation](https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html)
+
+## 20. Spring Security
+
+Spring Security provides authentication, authorization, and protection against common attacks.
+
+### Basic Security Configuration
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers("/", "/home", "/public/**").permitAll()
+                .requestMatchers("/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/**").hasRole("USER")
+                .anyRequest().authenticated()
+            )
+            .formLogin(form -> form
+                .loginPage("/login")
+                .permitAll()
+                .defaultSuccessUrl("/dashboard", true)
+            )
+            .logout(logout -> logout
+                .permitAll()
+                .logoutSuccessUrl("/login?logout")
+            )
+            .csrf(csrf -> csrf.disable());  // For API endpoints, you might want to disable CSRF
+
+        return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+```
+
+### In-Memory Authentication
+
+```java
+@Configuration
+public class InMemorySecurityConfig {
+
+    @Bean
+    public InMemoryUserDetailsManager userDetailsService(PasswordEncoder passwordEncoder) {
+        UserDetails user = User.builder()
+            .username("user")
+            .password(passwordEncoder.encode("password"))
+            .roles("USER")
+            .build();
+
+        UserDetails admin = User.builder()
+            .username("admin")
+            .password(passwordEncoder.encode("admin"))
+            .roles("USER", "ADMIN")
+            .build();
+
+        return new InMemoryUserDetailsManager(user, admin);
+    }
+}
+```
+
+### Database Authentication
+
+```java
+@Entity
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String username;
+
+    private String password;
+
+    private boolean enabled = true;
+
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "user_roles",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "role_id")
+    )
+    private Set<Role> roles = new HashSet<>();
+
+    // Getters and setters
+}
+
+@Entity
+public class Role {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String name;
+
+    // Getters and setters
+}
+
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByUsername(String username);
+}
+
+@Service
+public class UserDetailsServiceImpl implements UserDetailsService {
+
+    private final UserRepository userRepository;
+
+    @Autowired
+    public UserDetailsServiceImpl(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        User user = userRepository.findByUsername(username)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+
+        List<GrantedAuthority> authorities = user.getRoles().stream()
+            .map(role -> new SimpleGrantedAuthority("ROLE_" + role.getName()))
+            .collect(Collectors.toList());
+
+        return new org.springframework.security.core.userdetails.User(
+            user.getUsername(),
+            user.getPassword(),
+            user.isEnabled(),
+            true,  // accountNonExpired
+            true,  // credentialsNonExpired
+            true,  // accountNonLocked
+            authorities
+        );
+    }
+}
+
+@Configuration
+public class DatabaseSecurityConfig {
+
+    @Bean
+    public UserDetailsService userDetailsService() {
+        return new UserDetailsServiceImpl();
+    }
+
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider(
+            UserDetailsService userDetailsService,
+            PasswordEncoder passwordEncoder) {
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(userDetailsService);
+        provider.setPasswordEncoder(passwordEncoder);
+        return provider;
+    }
+}
+```
+
+### JWT Authentication
+
+```java
+@Configuration
+@EnableWebSecurity
+public class JwtSecurityConfig {
+
+    private final JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    public JwtSecurityConfig(JwtTokenProvider jwtTokenProvider) {
+        this.jwtTokenProvider = jwtTokenProvider;
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers("/auth/**").permitAll()
+                .anyRequest().authenticated()
+            )
+            .addFilterBefore(new JwtTokenFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+}
+
+@Component
+public class JwtTokenProvider {
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private long jwtExpiration;
+
+    private final UserDetailsService userDetailsService;
+
+    @Autowired
+    public JwtTokenProvider(UserDetailsService userDetailsService) {
+        this.userDetailsService = userDetailsService;
+    }
+
+    public String generateToken(Authentication authentication) {
+        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + jwtExpiration);
+
+        return Jwts.builder()
+            .setSubject(userDetails.getUsername())
+            .setIssuedAt(now)
+            .setExpiration(expiryDate)
+            .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes()))
+            .compact();
+    }
+
+    public String getUsernameFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+            .setSigningKey(Keys.hmacShaKeyFor(jwtSecret.getBytes()))
+            .build()
+            .parseClaimsJws(token)
+            .getBody();
+
+        return claims.getSubject();
+    }
+
+    public boolean validateToken(String token) {
+        try {
+            Jwts.parserBuilder()
+                .setSigningKey(Keys.hmacShaKeyFor(jwtSecret.getBytes()))
+                .build()
+                .parseClaimsJws(token);
+            return true;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+}
+
+public class JwtTokenFilter extends OncePerRequestFilter {
+
+    private final JwtTokenProvider jwtTokenProvider;
+
+    public JwtTokenFilter(JwtTokenProvider jwtTokenProvider) {
+        this.jwtTokenProvider = jwtTokenProvider;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                   FilterChain filterChain) throws ServletException, IOException {
+        try {
+            String token = getTokenFromRequest(request);
+
+            if (token != null && jwtTokenProvider.validateToken(token)) {
+                String username = jwtTokenProvider.getUsernameFromToken(token);
+
+                UserDetails userDetails = ((UserDetailsService) jwtTokenProvider)
+                    .loadUserByUsername(username);
+
+                UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception ex) {
+            logger.error("Could not set user authentication in security context", ex);
+        }
+
+        filterChain.doFilter(request, response);
+    }
+
+    private String getTokenFromRequest(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+
+        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+
+        return null;
+    }
+}
+
+@RestController
+@RequestMapping("/auth")
+public class AuthController {
+
+    private final AuthenticationManager authenticationManager;
+    private final JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    public AuthController(AuthenticationManager authenticationManager,
+                         JwtTokenProvider jwtTokenProvider) {
+        this.authenticationManager = authenticationManager;
+        this.jwtTokenProvider = jwtTokenProvider;
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
+        Authentication authentication = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(
+                loginRequest.getUsername(),
+                loginRequest.getPassword()
+            )
+        );
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        String jwt = jwtTokenProvider.generateToken(authentication);
+
+        return ResponseEntity.ok(new JwtResponse(jwt));
+    }
+}
+```
+
+**Resource:** [Spring Security Documentation](https://docs.spring.io/spring-security/reference/index.html)
+
+## Conclusion
+
+This guide has covered the core concepts of the Spring Framework in detail. Spring's modular design and comprehensive ecosystem make it a powerful tool for building enterprise Java applications. By understanding these core concepts, you can leverage Spring's capabilities to create robust, maintainable, and scalable applications.
+
+Here are some recommended resources for further learning:
+
+- [Spring Framework Documentation](https://docs.spring.io/spring-framework/reference/index.html)
+- [Spring Boot Documentation](https://docs.spring.io/spring-boot/docs/current/reference/html/)
+- [Spring Guides](https://spring.io/guides)
+- [Spring Blog](https://spring.io/blog)
+- [Spring Projects](https://spring.io/projects)

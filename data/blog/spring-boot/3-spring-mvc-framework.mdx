@@ -1,0 +1,377 @@
+---
+title: '3 - Spring MVC Framework with spring boot'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'Learn how to use Spring MVC framework to build web applications with a focus on controllers, view templates, form handling, validation, and exception handling.'
+authors: ['default']
+---
+
+**Key Focus Areas:**
+
+- Controllers and RequestMapping
+- View Templates (Thymeleaf)
+- Form Handling
+- Validation
+- Exception Handling
+
+## 1. Introduction to Spring MVC
+
+Spring MVC is a module of the Spring Framework that facilitates building web applications using the Model-View-Controller (MVC) design pattern. It provides a robust infrastructure for handling HTTP requests, rendering views, and managing user input.
+
+## 2. Controllers and RequestMapping
+
+Controllers handle incoming HTTP requests and return responses. The `@Controller` annotation marks a class as a controller, and `@RequestMapping` (or specific annotations like `@GetMapping`, `@PostMapping`) maps HTTP requests to methods.
+
+**Sample Code: Simple Controller**
+
+```java
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+@Controller
+@RequestMapping("/api")
+public class GreetingController {
+    @GetMapping("/greet")
+    @ResponseBody
+    public String greet() {
+        return "Hello, Spring MVC!";
+    }
+}
+```
+
+**Usage:**
+
+- The `@Controller` annotation enables the class to handle HTTP requests.
+- `@GetMapping("/greet")` maps GET requests to `/api/greet`.
+- `@ResponseBody` indicates the return value is the response body (not a view).
+
+## 3. View Templates (Thymeleaf)
+
+Thymeleaf is a server-side Java template engine integrated with Spring MVC for rendering dynamic HTML views. It supports natural templates and is highly extensible.
+
+**Sample Code: Thymeleaf Template (`src/main/resources/templates/greeting.html`)**
+
+```html
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <title>Greeting Page</title>
+  </head>
+  <body>
+    <h1 th:text="${message}">Default Message</h1>
+  </body>
+</html>
+```
+
+**Sample Code: Controller for Thymeleaf**
+
+```java
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+
+@Controller
+public class ViewController {
+    @GetMapping("/greeting")
+    public String showGreeting(Model model) {
+        model.addAttribute("message", "Welcome to Thymeleaf!");
+        return "greeting"; // Refers to greeting.html
+    }
+}
+```
+
+**Usage:**
+
+- Add `spring-boot-starter-thymeleaf` to your `pom.xml` for Thymeleaf support.
+- The controller adds a `message` attribute to the `Model`, which Thymeleaf uses to render the view.
+- The `greeting` return value resolves to `greeting.html` in the `templates` directory.
+
+**Maven Dependency for Thymeleaf:**
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-thymeleaf</artifactId>
+</dependency>
+```
+
+## 4. Form Handling
+
+Spring MVC simplifies form handling by binding form data to Java objects and processing submissions.
+
+**Sample Code: Form Object**
+
+```java
+public class UserForm {
+    private String name;
+    private String email;
+
+    // Getters and Setters
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+}
+```
+
+**Sample Code: Form Controller**
+
+```java
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+
+@Controller
+public class FormController {
+    @GetMapping("/form")
+    public String showForm(Model model) {
+        model.addAttribute("userForm", new UserForm());
+        return "form";
+    }
+
+    @PostMapping("/form")
+    public String submitForm(@ModelAttribute UserForm userForm, Model model) {
+        model.addAttribute("user", userForm);
+        return "result";
+    }
+}
+```
+
+**Sample Code: Thymeleaf Form (`src/main/resources/templates/form.html`)**
+
+```html
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <title>User Form</title>
+  </head>
+  <body>
+    <h1>Enter User Details</h1>
+    <form th:object="${userForm}" th:action="@{/form}" method="post">
+      <label>Name: </label>
+      <input type="text" th:field="*{name}" /><br />
+      <label>Email: </label>
+      <input type="email" th:field="*{email}" /><br />
+      <button type="submit">Submit</button>
+    </form>
+  </body>
+</html>
+```
+
+**Sample Code: Result Page (`src/main/resources/templates/result.html`)**
+
+```html
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <title>Form Result</title>
+  </head>
+  <body>
+    <h1>Submitted Details</h1>
+    <p>Name: <span th:text="${user.name}"></span></p>
+    <p>Email: <span th:text="${user.email}"></span></p>
+  </body>
+</html>
+```
+
+**Usage:**
+
+- The `@ModelAttribute` annotation binds form data to the `UserForm` object.
+- The GET request displays the form, and the POST request processes the submission.
+- Thymeleaf’s `th:object` and `th:field` bind form fields to the `UserForm` properties.
+
+## 5. Validation
+
+Spring MVC integrates with Bean Validation (JSR-380) to validate form input. Use annotations like `@NotBlank`, `@Email`, etc., from the `javax.validation` API.
+
+**Sample Code: Validated Form Object**
+
+```java
+import javax.validation.constraints.Email;
+import javax.validation.constraints.NotBlank;
+
+public class UserForm {
+    @NotBlank(message = "Name is required")
+    private String name;
+
+    @NotBlank(message = "Email is required")
+    @Email(message = "Invalid email format")
+    private String email;
+
+    // Getters and Setters
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+}
+```
+
+**Sample Code: Controller with Validation**
+
+```java
+import javax.validation.Valid;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.validation.BindingResult;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+
+@Controller
+public class FormController {
+    @GetMapping("/form")
+    public String showForm(Model model) {
+        model.addAttribute("userForm", new UserForm());
+        return "form";
+    }
+
+    @PostMapping("/form")
+    public String submitForm(@Valid @ModelAttribute UserForm userForm, BindingResult result, Model model) {
+        if (result.hasErrors()) {
+            return "form";
+        }
+        model.addAttribute("user", userForm);
+        return "result";
+    }
+}
+```
+
+**Sample Code: Form with Validation Errors (`form.html`)**
+
+```html
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <title>User Form</title>
+  </head>
+  <body>
+    <h1>Enter User Details</h1>
+    <form th:object="${userForm}" th:action="@{/form}" method="post">
+      <label>Name: </label>
+      <input type="text" th:field="*{name}" />
+      <span th:if="${#fields.hasErrors('name')}" th:errors="*{name}" style="color:red"></span><br />
+      <label>Email: </label>
+      <input type="email" th:field="*{email}" />
+      <span th:if="${#fields.hasErrors('email')}" th:errors="*{email}" style="color:red"></span
+      ><br />
+      <button type="submit">Submit</button>
+    </form>
+  </body>
+</html>
+```
+
+**Maven Dependency for Validation:**
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-validation</artifactId>
+</dependency>
+```
+
+**Usage:**
+
+- The `@Valid` annotation triggers validation on the `UserForm` object.
+- `BindingResult` captures validation errors, which are displayed in the form using Thymeleaf’s `th:errors`.
+
+## 6. Exception Handling
+
+Spring MVC provides centralized exception handling using `@ControllerAdvice` and `@ExceptionHandler` to manage errors gracefully.
+
+**Sample Code: Global Exception Handler**
+
+```java
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+
+@ControllerAdvice
+public class GlobalExceptionHandler {
+    @ExceptionHandler(Exception.class)
+    public String handleException(Exception ex, Model model) {
+        model.addAttribute("errorMessage", ex.getMessage());
+        return "error";
+    }
+}
+```
+
+**Sample Code: Error Page (`src/main/resources/templates/error.html`)**
+
+```html
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <title>Error Page</title>
+  </head>
+  <body>
+    <h1>Something Went Wrong!</h1>
+    <p th:text="${errorMessage}">Default Error Message</p>
+  </body>
+</html>
+```
+
+**Sample Code: Controller Throwing Exception**
+
+```java
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+
+@Controller
+public class ErrorController {
+    @GetMapping("/error-test")
+    public String triggerError() {
+        throw new RuntimeException("This is a test exception!");
+    }
+}
+```
+
+**Usage:**
+
+- `@ControllerAdvice` defines a global exception handler.
+- `@ExceptionHandler` catches specific exceptions (e.g., `Exception.class`) and renders the `error.html` view.
+- Custom error messages are passed to the view via the `Model`.
+
+## 7. Putting It All Together
+
+To create a Spring MVC application with the above features:
+
+**Sample Code: Main Application**
+
+```java
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class SpringMvcApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(SpringMvcApplication.class, args);
+    }
+}
+```
+
+**Steps to Run:**
+
+1. Create a Spring Boot project with `spring-boot-starter-web`, `spring-boot-starter-thymeleaf`, and `spring-boot-starter-validation` dependencies.
+2. Add the controller, form, validation, and exception handling code.
+3. Create Thymeleaf templates in `src/main/resources/templates`.
+4. Run the application using `mvn spring-boot:run`.
+5. Access:
+   - `http://localhost:8080/api/greet` for the REST endpoint.
+   - `http://localhost:8080/greeting` for the Thymeleaf view.
+   - `http://localhost:8080/form` for the form.
+   - `http://localhost:8080/error-test` to trigger an error.
+
+## 8. Conclusion
+
+Spring MVC, combined with Thymeleaf, provides a powerful framework for building web applications. Controllers handle requests, Thymeleaf renders dynamic views, and features like form handling, validation, and exception handling ensure robust applications.
+
+**Next Steps:**
+
+- Explore REST APIs with `@RestController`.
+- Learn about Spring Security for authentication.
+- Integrate Spring Data JPA for database operations.

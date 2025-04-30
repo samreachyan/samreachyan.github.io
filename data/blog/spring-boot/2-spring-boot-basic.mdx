@@ -1,0 +1,242 @@
+---
+title: '2 - Spring Boot Basic: Detailed Guide'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'Learn how Spring Boot simplifies the configuration and deployment of Spring applications'
+authors: ['default']
+---
+
+Learn how Spring Boot simplifies the configuration and deployment of Spring applications.
+
+**Key Focus Areas:**
+
+- Spring Boot Starters
+- Auto-configuration
+- Application Properties
+- Externalized Configuration
+- Profiles for Different Environments
+
+## 1. Introduction to Spring Boot
+
+Spring Boot is a framework that simplifies the development of Spring applications by providing default configurations, embedded servers, and a streamlined setup process. It eliminates much of the boilerplate code required in traditional Spring applications, allowing developers to focus on business logic.
+
+## 2. Spring Boot Starters
+
+Spring Boot Starters are dependency descriptors that bundle related dependencies for specific functionalities. They reduce the complexity of managing dependencies in a project.
+
+**Example Starter Dependency:**
+For a web application, include the `spring-boot-starter-web` dependency.
+
+**Sample Code: Maven `pom.xml`**
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+</dependencies>
+```
+
+**Explanation:**
+
+- The `spring-boot-starter-web` includes dependencies for building RESTful web services, such as Spring MVC, Tomcat, and Jackson for JSON processing.
+- Starters like `spring-boot-starter-data-jpa`, `spring-boot-starter-security`, etc., serve other purposes.
+
+## 3. Auto-configuration
+
+Spring Boot’s auto-configuration automatically configures your application based on the dependencies present in the classpath. It eliminates manual configuration for common setups like database connections or web servers.
+
+**Example: Auto-configured REST Controller**
+
+```java
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class HelloController {
+    @GetMapping("/hello")
+    public String sayHello() {
+        return "Hello, Spring Boot!";
+    }
+}
+```
+
+**Explanation:**
+
+- The `@RestController` annotation triggers auto-configuration of Spring MVC.
+- No manual XML or Java-based configuration is needed; Spring Boot detects the `spring-boot-starter-web` dependency and configures the necessary beans.
+
+## 4. Application Properties
+
+Spring Boot uses the `application.properties` or `application.yml` file to configure application settings, such as server port, database credentials, or custom properties.
+
+**Sample Code: `application.properties`**
+
+```properties
+server.port=8080
+spring.application.name=my-spring-boot-app
+custom.message=Welcome to Spring Boot!
+```
+
+**Accessing Properties in Code:**
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class ConfigController {
+    @Value("${custom.message}")
+    private String message;
+
+    @GetMapping("/message")
+    public String getMessage() {
+        return message;
+    }
+}
+```
+
+**Explanation:**
+
+- The `@Value` annotation injects the value of `custom.message` from `application.properties`.
+- Properties can control various aspects, such as database URLs, logging levels, or application-specific settings.
+
+## 5. Externalized Configuration
+
+Externalized configuration allows you to override properties without modifying the application code. This is useful for deploying the same application in different environments (e.g., development, production).
+
+**Example: Command-line Arguments**
+Run the application with a custom property:
+
+```bash
+java -jar my-app.jar --server.port=9090
+```
+
+**Example: External `application.yml`**
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/devdb
+    username: devuser
+    password: devpass
+```
+
+**Explanation:**
+
+- Properties can be provided via command-line arguments, environment variables, or external files.
+- External configuration ensures flexibility for different deployment scenarios.
+
+## 6. Profiles for Different Environments
+
+Spring Boot profiles allow you to define environment-specific configurations. You can create separate property files like `application-dev.properties` or `application-prod.properties` for different environments.
+
+**Sample Code: `application-dev.properties`**
+
+```properties
+server.port=8081
+spring.datasource.url=jdbc:h2:mem:devdb
+```
+
+**Sample Code: `application-prod.properties`**
+
+```properties
+server.port=8080
+spring.datasource.url=jdbc:mysql://prod-db:3306/proddb
+```
+
+**Activating a Profile:**
+
+```java
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class MyApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(MyApplication.class, args);
+    }
+}
+```
+
+Run the application with a specific profile:
+
+```bash
+java -jar my-app.jar --spring.profiles.active=dev
+```
+
+**Explanation:**
+
+- The `spring.profiles.active` property determines which profile is active.
+- Profiles enable environment-specific configurations, such as different databases or logging levels.
+
+## 7. Putting It All Together
+
+Below is a complete example of a Spring Boot application showcasing the concepts discussed.
+
+**Sample Code: Main Application**
+
+```java
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class MySpringBootApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(MySpringBootApplication.class, args);
+    }
+}
+```
+
+**Sample Code: REST Controller with Properties**
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class WelcomeController {
+    @Value("${custom.message}")
+    private String message;
+
+    @GetMapping("/welcome")
+    public String welcome() {
+        return message;
+    }
+}
+```
+
+**Sample Code: `application.yml`**
+
+```yaml
+server:
+  port: 8080
+spring:
+  application:
+    name: my-spring-boot-app
+  profiles:
+    active: dev
+custom:
+  message: Hello from Spring Boot!
+```
+
+**Steps to Run:**
+
+1. Create a new Spring Boot project using Spring Initializr (https://start.spring.io/) with `spring-boot-starter-web`.
+2. Add the above code and configuration files.
+3. Run the application using `mvn spring-boot:run` or `java -jar target/my-app.jar`.
+4. Access `http://localhost:8080/welcome` to see the output.
+
+## 8. Conclusion
+
+Spring Boot simplifies Spring application development through starters, auto-configuration, and flexible configuration mechanisms like properties and profiles. By leveraging these features, developers can build robust, production-ready applications with minimal setup.
+
+**Next Steps:**
+
+- Explore Spring Boot Actuator for monitoring.
+- Learn about Spring Data JPA for database integration.
+- Experiment with Spring Security for authentication and authorization.
