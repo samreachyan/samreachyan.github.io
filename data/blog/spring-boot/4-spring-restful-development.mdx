@@ -1,0 +1,279 @@
+---
+title: '4 - Restful API Development'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'REST (Representational State Transfer) is an architectural style for designing networked applications.'
+authors: ['default']
+---
+
+## Table of Contents
+
+1. [REST Principles](#rest-principles)
+2. [Controller Design](#controller-design)
+3. [Request/Response Handling](#requestresponse-handling)
+4. [Resource Representation](#resource-representation)
+5. [API Documentation with Swagger/OpenAPI](#api-documentation-with-swaggeropenapi)
+6. [Spring HATEOAS Project](#spring-hateoas-project)
+
+---
+
+## REST Principles
+
+REST (Representational State Transfer) is an architectural style for designing networked applications. Key principles include:
+
+- **Client-Server Architecture**: Separation of concerns between UI and data storage
+- **Statelessness**: Each request contains all necessary information
+- **Cacheability**: Responses must define themselves as cacheable or not
+- **Uniform Interface**: Resources are identified in requests, representations are used, self-descriptive messages, HATEOAS
+- **Layered System**: Client can't tell if it's connected directly to server or through intermediaries
+- **Code on Demand (optional)**: Servers can temporarily extend client functionality
+
+```java
+// Example of RESTful endpoint in Spring
+@RestController
+@RequestMapping("/api/books")
+public class BookController {
+    @GetMapping
+    public ResponseEntity<List<Book>> getAllBooks() {
+        // Implementation
+    }
+}
+```
+
+---
+
+## Controller Design
+
+Controllers handle HTTP requests and return responses. Best practices:
+
+- Keep controllers thin (delegate business logic to services)
+- Use proper HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- Return appropriate HTTP status codes
+- Handle exceptions gracefully
+
+```java
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+
+    private final UserService userService;
+
+    // Constructor injection
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<User> getUserById(@PathVariable Long id) {
+        return userService.findById(id)
+               .map(ResponseEntity::ok)
+               .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping
+    public ResponseEntity<User> createUser(@Valid @RequestBody User user) {
+        User savedUser = userService.save(user);
+        return ResponseEntity.created(URI.create("/api/users/" + savedUser.getId()))
+               .body(savedUser);
+    }
+}
+```
+
+---
+
+## Request/Response Handling
+
+### Request Handling:
+
+- Path variables (`@PathVariable`)
+- Query parameters (`@RequestParam`)
+- Request body (`@RequestBody`)
+- Headers (`@RequestHeader`)
+- Validation (`@Valid`)
+
+### Response Handling:
+
+- Proper HTTP status codes
+- Consistent response format
+- Error handling
+
+```java
+// Example with comprehensive request handling
+@GetMapping
+public ResponseEntity<Page<User>> getUsers(
+    @RequestParam(required = false) String name,
+    @RequestParam(defaultValue = "0") int page,
+    @RequestParam(defaultValue = "10") int size,
+    @RequestHeader("X-Request-ID") String requestId) {
+
+    Pageable pageable = PageRequest.of(page, size);
+    Page<User> users = userService.findByName(name, pageable);
+
+    HttpHeaders headers = new HttpHeaders();
+    headers.add("X-Request-ID", requestId);
+
+    return new ResponseEntity<>(users, headers, HttpStatus.OK);
+}
+
+// Error handling example
+@ExceptionHandler(ResourceNotFoundException.class)
+public ResponseEntity<ErrorResponse> handleNotFound(ResourceNotFoundException ex) {
+    ErrorResponse error = new ErrorResponse(
+        "NOT_FOUND",
+        ex.getMessage(),
+        Instant.now()
+    );
+    return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+}
+```
+
+---
+
+## Resource Representation
+
+Resources should be represented consistently. Consider:
+
+- Data Transfer Objects (DTOs) instead of exposing entities directly
+- Nested resources representation
+- Pagination for collections
+- Filtering, sorting capabilities
+
+```java
+// Example DTO
+public class BookDto {
+    private Long id;
+    private String title;
+    private String isbn;
+    private String authorName;
+    // Getters and setters
+}
+
+// Example with pagination
+@GetMapping
+public ResponseEntity<PageDto<BookDto>> getAllBooks(
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "10") int size) {
+
+    Page<Book> bookPage = bookService.findAll(PageRequest.of(page, size));
+    PageDto<BookDto> pageDto = new PageDto<>(
+        bookPage.map(this::convertToDto),
+        bookPage.getNumber(),
+        bookPage.getTotalPages()
+    );
+
+    return ResponseEntity.ok(pageDto);
+}
+```
+
+---
+
+## API Documentation with Swagger/OpenAPI
+
+Swagger/OpenAPI helps document and visualize REST APIs.
+
+### Spring Boot Configuration:
+
+```java
+@Configuration
+public class SwaggerConfig {
+
+    @Bean
+    public OpenAPI customOpenAPI() {
+        return new OpenAPI()
+            .info(new Info()
+                .title("Bookstore API")
+                .version("1.0")
+                .description("API for managing books and authors")
+                .contact(new Contact()
+                    .name("API Support")
+                    .email("support@bookstore.com")))
+            .externalDocs(new ExternalDocumentation()
+                .description("Bookstore API Wiki")
+                .url("https://bookstore.wiki.com"));
+    }
+}
+```
+
+### Annotating Controllers:
+
+```java
+@Operation(summary = "Get a book by id")
+@ApiResponses(value = {
+    @ApiResponse(responseCode = "200", description = "Found the book",
+        content = { @Content(mediaType = "application/json",
+        schema = @Schema(implementation = BookDto.class)) }),
+    @ApiResponse(responseCode = "404", description = "Book not found",
+        content = @Content) })
+@GetMapping("/{id}")
+public ResponseEntity<BookDto> getBookById(@Parameter(description = "ID of book to be retrieved")
+                                          @PathVariable Long id) {
+    // implementation
+}
+```
+
+Access documentation at: `http://localhost:8080/swagger-ui.html`
+
+---
+
+## Spring HATEOAS Project
+
+HATEOAS (Hypermedia as the Engine of Application State) makes APIs more discoverable by including links to related resources.
+
+### Example Implementation:
+
+```java
+@RestController
+@RequestMapping("/api/books")
+public class BookController {
+
+    private final BookService bookService;
+    private final EntityLinks entityLinks;
+
+    public BookController(BookService bookService, EntityLinks entityLinks) {
+        this.bookService = bookService;
+        this.entityLinks = entityLinks;
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<EntityModel<BookDto>> getBookById(@PathVariable Long id) {
+        return bookService.findById(id)
+               .map(this::convertToDto)
+               .map(this::addLinks)
+               .map(ResponseEntity::ok)
+               .orElse(ResponseEntity.notFound().build());
+    }
+
+    private BookDto convertToDto(Book book) {
+        // conversion logic
+    }
+
+    private EntityModel<BookDto> addLinks(BookDto dto) {
+        EntityModel<BookDto> model = EntityModel.of(dto);
+        model.add(linkTo(methodOn(BookController.class).getBookById(dto.getId())).withSelfRel());
+        model.add(linkTo(methodOn(BookController.class).getAllBooks()).withRel("books"));
+        // Add more links as needed
+        return model;
+    }
+}
+```
+
+### Sample Response with HATEOAS:
+
+```json
+{
+  "id": 1,
+  "title": "RESTful API Design",
+  "isbn": "1234567890",
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/api/books/1"
+    },
+    "books": {
+      "href": "http://localhost:8080/api/books"
+    }
+  }
+}
+```
+
+This tutorial covers the fundamental aspects of RESTful API development with practical examples. Remember to adapt these patterns to your specific requirements and always consider API versioning, security, and performance in your implementations.

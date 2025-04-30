@@ -1,0 +1,504 @@
+---
+title: '7 - Spring Security tutorial part two'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'Comprehensive Spring Security foundation, let us dive deeper into advanced topics and practical implementations.'
+authors: ['default']
+---
+
+## Table of Contents
+
+1. [CSRF Protection](#csrf-protection)
+2. [CORS Configuration](#cors-configuration)
+3. [Multi-Factor Authentication](#multi-factor-authentication)
+4. [Social Login (OAuth 2.0 Providers)](#social-login)
+5. [Rate Limiting](#rate-limiting)
+6. [Security Headers](#security-headers)
+7. [Actuator Security](#actuator-security)
+8. [Testing Security](#testing-security)
+9. [Production Considerations](#production-considerations)
+10. [Troubleshooting](#troubleshooting)
+
+## CSRF Protection <a name="csrf-protection"></a>
+
+### Understanding CSRF
+
+Cross-Site Request Forgery (CSRF) attacks exploit authenticated sessions. Spring provides built-in protection:
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            // Enable CSRF for state-changing operations
+            .csrf(csrf -> csrf
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                // Exclude API endpoints if using JWT
+                .ignoringRequestMatchers("/api/**")
+            );
+        return http.build();
+    }
+}
+```
+
+### For Thymeleaf Forms
+
+```html
+<form method="post" action="/transfer">
+  <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}" />
+  <!-- form fields -->
+</form>
+```
+
+## CORS Configuration <a name="cors-configuration"></a>
+
+Proper CORS setup is essential for modern web apps:
+
+```java
+@Configuration
+public class CorsConfig {
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of("https://trusted.com"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE"));
+        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setExposedHeaders(List.of("Authorization"));
+        configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
+}
+```
+
+## Multi-Factor Authentication <a name="multi-factor-authentication"></a>
+
+### Implementing TOTP (Time-Based One-Time Password)
+
+```java
+@Service
+public class TotpService {
+
+    private final GoogleAuthenticator gAuth = new GoogleAuthenticator();
+
+    public String generateSecretKey() {
+        return gAuth.createCredentials().getKey();
+    }
+
+    public String generateQrCodeUrl(String username, String secret) {
+        return String.format("otpauth://totp/%s?secret=%s&issuer=MyApp", username, secret);
+    }
+
+    public boolean verifyCode(String secret, int code) {
+        return gAuth.authorize(secret, code);
+    }
+}
+
+@RestController
+@RequestMapping("/api/v1/mfa")
+public class MfaController {
+
+    private final TotpService totpService;
+    private final UserService userService;
+
+    @PostMapping("/setup")
+    public ResponseEntity<String> setupMfa(@AuthenticationPrincipal User user) {
+        String secret = totpService.generateSecretKey();
+        userService.saveMfaSecret(user.getId(), secret);
+        String qrCodeUrl = totpService.generateQrCodeUrl(user.getEmail(), secret);
+        return ResponseEntity.ok(qrCodeUrl);
+    }
+
+    @PostMapping("/verify")
+    public ResponseEntity<?> verifyMfa(
+        @AuthenticationPrincipal User user,
+        @RequestParam int code
+    ) {
+        String secret = userService.getMfaSecret(user.getId());
+        if (totpService.verifyCode(secret, code)) {
+            return ResponseEntity.ok().build();
+        }
+        return ResponseEntity.badRequest().build();
+    }
+}
+```
+
+## Social Login (OAuth 2.0 Providers) <a name="social-login"></a>
+
+### Configuring Google Login
+
+```java
+@Configuration
+public class OAuth2LoginConfig {
+
+    @Bean
+    public ClientRegistrationRepository clientRegistrationRepository() {
+        return new InMemoryClientRegistrationRepository(
+            googleClientRegistration()
+        );
+    }
+
+    private ClientRegistration googleClientRegistration() {
+        return ClientRegistration.withRegistrationId("google")
+            .clientId("your-client-id")
+            .clientSecret("your-client-secret")
+            .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+            .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+            .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+            .scope("openid", "profile", "email")
+            .authorizationUri("https://accounts.google.com/o/oauth2/v2/auth")
+            .tokenUri("https://www.googleapis.com/oauth2/v4/token")
+            .userInfoUri("https://www.googleapis.com/oauth2/v3/userinfo")
+            .userNameAttributeName(IdTokenClaimNames.SUB)
+            .clientName("Google")
+            .build();
+    }
+}
+```
+
+### Custom OAuth2 User Service
+
+```java
+@Service
+public class CustomOAuth2UserService extends DefaultOAuth2UserService {
+
+    private final UserRepository userRepository;
+
+    @Override
+    public OAuth2User loadUser(OAuth2UserRequest userRequest) throws OAuth2AuthenticationException {
+        OAuth2User oAuth2User = super.loadUser(userRequest);
+
+        Map<String, Object> attributes = oAuth2User.getAttributes();
+        String email = (String) attributes.get("email");
+
+        User user = userRepository.findByEmail(email)
+            .orElseGet(() -> {
+                User newUser = new User();
+                newUser.setEmail(email);
+                newUser.setProvider(userRequest.getClientRegistration().getRegistrationId());
+                newUser.setRole(Role.USER);
+                return userRepository.save(newUser);
+            });
+
+        return new DefaultOAuth2User(
+            Collections.singleton(new SimpleGrantedAuthority(user.getRole().name())),
+            attributes,
+            "email" // name attribute key
+        );
+    }
+}
+```
+
+## Rate Limiting <a name="rate-limiting"></a>
+
+Protect against brute force attacks:
+
+```java
+@Configuration
+public class RateLimitConfig {
+
+    @Bean
+    public MeterRegistry meterRegistry() {
+        return new SimpleMeterRegistry();
+    }
+
+    @Bean
+    public RateLimiterRegistry rateLimiterRegistry(MeterRegistry meterRegistry) {
+        return RateLimiterRegistry.of(
+            RateLimiterConfig.custom()
+                .limitRefreshPeriod(Duration.ofMinutes(1))
+                .limitForPeriod(5)
+                .timeoutDuration(Duration.ofMillis(25))
+                .build(),
+            meterRegistry
+        );
+    }
+}
+
+@RestController
+@RequestMapping("/api/v1/auth")
+public class AuthController {
+
+    private final RateLimiter rateLimiter;
+
+    public AuthController(RateLimiterRegistry rateLimiterRegistry) {
+        this.rateLimiter = rateLimiterRegistry.rateLimiter("loginAttempts");
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody LoginRequest request) {
+        if (rateLimiter.acquirePermission()) {
+            // Process login
+        } else {
+            throw new TooManyRequestsException("Too many login attempts");
+        }
+    }
+}
+```
+
+## Security Headers <a name="security-headers"></a>
+
+Enhance security with HTTP headers:
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .headers(headers -> headers
+                .contentSecurityPolicy(csp -> csp
+                    .policyDirectives("default-src 'self'; script-src 'self' 'unsafe-inline'")
+                )
+                .frameOptions(frame -> frame.sameOrigin())
+                .httpStrictTransportSecurity(hsts -> hsts
+                    .includeSubDomains(true)
+                    .preload(true)
+                    .maxAgeInSeconds(63072000)
+                )
+                .xssProtection(xss -> xss
+                    .headerValue(XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK)
+                )
+                .contentTypeOptions(HeadersConfigurer.ContentTypeOptionsConfig::disable)
+            );
+        return http.build();
+    }
+}
+```
+
+## Actuator Security <a name="actuator-security"></a>
+
+Securing Spring Boot Actuator endpoints:
+
+```java
+@Configuration
+@EnableWebSecurity
+public class ActuatorSecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .securityMatcher("/actuator/**")
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers("/actuator/info").permitAll()
+                .requestMatchers("/actuator/**").hasRole("ADMIN")
+            )
+            .httpBasic(Customizer.withDefaults());
+        return http.build();
+    }
+}
+```
+
+## Testing Security <a name="testing-security"></a>
+
+### Integration Tests with Security
+
+```java
+@SpringBootTest
+@AutoConfigureMockMvc
+class SecurityIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void whenUserAccessUserEndpoint_thenOk() throws Exception {
+        mockMvc.perform(get("/api/v1/user"))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void whenUserAccessAdminEndpoint_thenForbidden() throws Exception {
+        mockMvc.perform(get("/api/v1/admin"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void whenUnauthenticated_thenRedirectToLogin() throws Exception {
+        mockMvc.perform(get("/api/v1/user"))
+            .andExpect(status().isUnauthorized());
+    }
+}
+```
+
+### JWT Test Utilities
+
+```java
+public class TestJwtUtils {
+
+    public static String generateValidJwt(User user) {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+            .header("alg", "none")
+            .claim("sub", user.getEmail())
+            .claim("roles", user.getRole().name())
+            .build();
+        return jwt.getTokenValue();
+    }
+
+    public static MockHttpServletRequestBuilder withJwtToken(
+        MockHttpServletRequestBuilder builder,
+        User user
+    ) {
+        return builder.header("Authorization", "Bearer " + generateValidJwt(user));
+    }
+}
+```
+
+## Production Considerations <a name="production-considerations"></a>
+
+1. **Secret Management**:
+
+   - Never hardcode secrets
+   - Use environment variables or secret management tools (Vault, AWS Secrets Manager)
+   - Example for `application.yml`:
+     ```yaml
+     security:
+       jwt:
+         secret: ${JWT_SECRET:default-secret-for-dev-only}
+     ```
+
+2. **Key Rotation**:
+
+   ```java
+   @Service
+   public class JwtKeyRotationService {
+
+       private final Map<String, SecretKey> keys = new ConcurrentHashMap<>();
+       private String currentKeyId;
+
+       @PostConstruct
+       public void init() {
+           rotateKey();
+       }
+
+       public void rotateKey() {
+           String newKeyId = UUID.randomUUID().toString();
+           SecretKey newKey = Keys.secretKeyFor(SignatureAlgorithm.HS256);
+           keys.put(newKeyId, newKey);
+           currentKeyId = newKeyId;
+           // Schedule next rotation
+       }
+
+       public SecretKey getCurrentKey() {
+           return keys.get(currentKeyId);
+       }
+
+       public SecretKey getKey(String keyId) {
+           return keys.get(keyId);
+       }
+   }
+   ```
+
+3. **Logging and Monitoring**:
+   - Log authentication attempts (success/failure)
+   - Monitor for unusual patterns
+   - Example logging aspect:
+     ```java
+     @Aspect
+     @Component
+     @RequiredArgsConstructor
+     public class AuthLoggingAspect {
+
+         private final LoggingService loggingService;
+
+         @AfterReturning(
+             pointcut = "execution(* com.example.demo.security..*AuthenticationProvider.authenticate(..))",
+             returning = "authentication"
+         )
+         public void logSuccessfulAuth(Authentication authentication) {
+             loggingService.logAuthSuccess(authentication.getName());
+         }
+
+         @AfterThrowing(
+             pointcut = "execution(* com.example.demo.security..*AuthenticationProvider.authenticate(..))",
+             throwing = "exception"
+         )
+         public void logFailedAuth(AuthenticationException exception) {
+             loggingService.logAuthFailure(exception.getMessage());
+         }
+     }
+     ```
+
+## Troubleshooting <a name="troubleshooting"></a>
+
+### Common Issues and Solutions
+
+1. **Authentication Fails Silently**:
+
+   - Enable debug logging: `logging.level.org.springframework.security=DEBUG`
+   - Check filter chain order
+
+2. **CSRF Token Mismatch**:
+
+   - Verify token is included in forms
+   - Check session consistency
+
+3. **CORS Problems**:
+
+   - Ensure proper headers are set
+   - Verify pre-flight requests (OPTIONS) are handled
+
+4. **JWT Validation Fails**:
+
+   - Check token expiration
+   - Verify signature algorithm matches
+   - Ensure clock synchronization
+
+5. **OAuth2 Redirect Issues**:
+   - Verify redirect URIs are whitelisted with provider
+   - Check for trailing slashes in URIs
+
+### Debugging Configuration
+
+```java
+@Configuration
+public class SecurityDebugConfig {
+
+    @Bean
+    @Profile("debug")
+    public SecurityFilterChain debugFilterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(auth -> auth
+                .anyRequest().permitAll()
+            )
+            .csrf().disable()
+            .headers().disable();
+        return http.build();
+    }
+}
+```
+
+## Next Steps
+
+1. **Advanced Topics to Explore**:
+
+   - Mutual TLS (mTLS) for service-to-service auth
+   - WebAuthn for passwordless authentication
+   - OPA (Open Policy Agent) for externalized authorization
+   - Kubernetes-native security with SPIFFE/SPIRE
+
+2. **Performance Considerations**:
+
+   - JWT validation overhead
+   - Session replication strategies
+   - Caching authenticated principals
+
+3. **Compliance**:
+   - GDPR considerations
+   - PCI DSS requirements
+   - HIPAA security rules
+
+This concludes our advanced Spring Security tutorial. The complete source code is available in the accompanying GitHub repository. Always remember to adapt security configurations to your specific requirements and threat model.

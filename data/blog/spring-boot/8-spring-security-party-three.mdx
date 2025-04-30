@@ -1,0 +1,692 @@
+---
+title: '8 - Spring Security tutorial part three'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'Dive into professional-grade security implementations used in enterprise environments, covering advanced scenarios and real-world patterns.'
+authors: ['default']
+---
+
+Spring Security Masterclass - Part 3: Enterprise-Grade Security Patterns
+
+## Table of Contents
+
+1. [Domain-Driven Security](#domain-driven-security)
+2. [Zero Trust Architecture](#zero-trust-architecture)
+3. [Policy-Based Access Control](#policy-based-access-control)
+4. [Security Event Streaming](#security-event-streaming)
+5. [Distributed Session Management](#distributed-session-management)
+6. [Secret Rotation Automation](#secret-rotation-automation)
+7. [Security as Code](#security-as-code)
+8. [Chaos Engineering for Security](#chaos-engineering-for-security)
+9. [Compliance Automation](#compliance-automation)
+10. [Emerging Trends](#emerging-trends)
+
+## Domain-Driven Security <a name="domain-driven-security"></a>
+
+### Context-Specific Authorization
+
+```java
+public interface PolicyEnforcer {
+    boolean check(Authentication authentication, Object target, String permission);
+}
+
+@Service
+public class OrderPolicyEnforcer implements PolicyEnforcer {
+
+    private final OrderRepository orderRepository;
+
+    @Override
+    public boolean check(Authentication authentication, Object target, String permission) {
+        if (!(target instanceof Order order)) return false;
+
+        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+
+        return switch (permission) {
+            case "view" -> canViewOrder(principal, order);
+            case "cancel" -> canCancelOrder(principal, order);
+            case "update" -> canUpdateOrder(principal, order);
+            default -> false;
+        };
+    }
+
+    private boolean canViewOrder(UserPrincipal principal, Order order) {
+        return order.getCustomerId().equals(principal.getId())
+            || principal.hasRole("ORDER_VIEWER");
+    }
+
+    private boolean canCancelOrder(UserPrincipal principal, Order order) {
+        if (order.getStatus() != OrderStatus.PENDING) return false;
+        return order.getCustomerId().equals(principal.getId())
+            || (principal.hasRole("ORDER_MANAGER")
+                && order.getRegion().equals(principal.getRegion()));
+    }
+}
+```
+
+### Annotation-Driven Policy Enforcement
+
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+@PreAuthorize("@policyEnforcer.check(authentication, #order, 'cancel')")
+public @interface CanCancelOrder {}
+
+@RestController
+@RequestMapping("/orders")
+public class OrderController {
+
+    @PostMapping("/{orderId}/cancel")
+    @CanCancelOrder
+    public ResponseEntity<Void> cancelOrder(@PathVariable Order order) {
+        orderService.cancel(order);
+        return ResponseEntity.ok().build();
+    }
+}
+```
+
+## Zero Trust Architecture <a name="zero-trust-architecture"></a>
+
+### Continuous Authentication Pattern
+
+```java
+public class ContinuousAuthenticationFilter extends OncePerRequestFilter {
+
+    private final AuthenticationTrustResolver trustResolver;
+    private final RiskAssessmentService riskService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                  HttpServletResponse response,
+                                  FilterChain chain) throws IOException, ServletException {
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+
+        if (auth != null && !trustResolver.isAnonymous(auth)) {
+            RiskAssessment risk = riskService.assess(request, auth);
+
+            if (risk.isHigh()) {
+                SecurityContextHolder.clearContext();
+                response.sendError(HttpStatus.FORBIDDEN.value(), "Re-authentication required");
+                return;
+            }
+
+            if (risk.isElevated()) {
+                auth.setAuthenticated(false);
+            }
+        }
+
+        chain.doFilter(request, response);
+    }
+}
+```
+
+### Device Context Validation
+
+```java
+@Service
+public class DeviceValidationService {
+
+    private final DeviceRepository deviceRepo;
+    private final GeoLocationService geoService;
+
+    public void validateDevice(HttpServletRequest request, UserPrincipal principal) {
+        String deviceId = request.getHeader("X-Device-ID");
+        String ipAddress = request.getRemoteAddr();
+
+        Device knownDevice = deviceRepo.findByUserIdAndDeviceId(principal.getId(), deviceId)
+            .orElseThrow(() -> new SuspiciousDeviceException("Unrecognized device"));
+
+        if (knownDevice.isCompromised()) {
+            throw new CompromisedDeviceException();
+        }
+
+        GeoLocation currentLocation = geoService.lookup(ipAddress);
+        if (!knownDevice.getCommonLocations().contains(currentLocation.getCountry())) {
+            principal.setMfaRequired(true);
+        }
+    }
+}
+```
+
+## Policy-Based Access Control <a name="policy-based-access-control"></a>
+
+### OPA Integration
+
+```java
+@Configuration
+public class OpaConfig {
+
+    @Bean
+    public OpenPolicyAgentClient opaClient() {
+        return new OpenPolicyAgentClient("http://opa:8181/v1/data/app/policy");
+    }
+}
+
+@Service
+public class OpaPolicyService {
+
+    private final OpenPolicyAgentClient opaClient;
+
+    public boolean checkAccess(Authentication auth, HttpServletRequest request, Object resource) {
+        Map<String, Object> input = Map.of(
+            "user", auth.getPrincipal(),
+            "path", request.getRequestURI(),
+            "method", request.getMethod(),
+            "resource", resource
+        );
+
+        OpaResponse response = opaClient.evaluate(input);
+        return response.getResult().get("allow").equals(true);
+    }
+}
+```
+
+### Dynamic Permission Management
+
+```java
+@Entity
+public class SecurityPolicy {
+
+    @Id
+    private String id;
+
+    private String resourcePattern;
+    private String action;
+
+    @ElementCollection
+    private Set<String> requiredRoles = new HashSet<>();
+
+    @ElementCollection
+    private Set<String> requiredAttributes = new HashSet<>();
+
+    @ElementCollection
+    private Set<String> prohibitedAttributes = new HashSet<>();
+
+    private String conditionSpEL;
+}
+
+@Service
+public class DynamicPermissionEvaluator implements PermissionEvaluator {
+
+    private final PolicyRepository policyRepo;
+    private final SpelExpressionParser parser = new SpelExpressionParser();
+
+    @Override
+    public boolean hasPermission(Authentication auth, Object target, Object permission) {
+        List<SecurityPolicy> policies = policyRepo.findByResourcePatternAndAction(
+            target.getClass().getSimpleName(),
+            permission.toString()
+        );
+
+        return policies.stream().anyMatch(policy -> matchesPolicy(auth, target, policy));
+    }
+
+    private boolean matchesPolicy(Authentication auth, Object target, SecurityPolicy policy) {
+        UserPrincipal principal = (UserPrincipal) auth.getPrincipal();
+
+        boolean roleMatch = policy.getRequiredRoles().isEmpty()
+            || principal.getAuthorities().stream()
+                .anyMatch(g -> policy.getRequiredRoles().contains(g.getAuthority()));
+
+        boolean attrMatch = policy.getRequiredAttributes().stream()
+            .allMatch(attr -> principal.getAttributes().containsKey(attr));
+
+        boolean noProhibited = policy.getProhibitedAttributes().stream()
+            .noneMatch(attr -> principal.getAttributes().containsKey(attr));
+
+        boolean conditionMatch = policy.getConditionSpEL() == null
+            || parser.parseExpression(policy.getConditionSpEL())
+                .getValue(new PolicyEvaluationContext(principal, target), Boolean.class);
+
+        return roleMatch && attrMatch && noProhibited && conditionMatch;
+    }
+}
+```
+
+## Security Event Streaming <a name="security-event-streaming"></a>
+
+### Kafka Security Event Producer
+
+```java
+@Configuration
+public class KafkaSecurityConfig {
+
+    @Bean
+    public ProducerFactory<String, SecurityEvent> securityEventProducerFactory() {
+        Map<String, Object> config = new HashMap<>();
+        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka:9092");
+        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+        return new DefaultKafkaProducerFactory<>(config);
+    }
+
+    @Bean
+    public KafkaTemplate<String, SecurityEvent> securityEventKafkaTemplate() {
+        return new KafkaTemplate<>(securityEventProducerFactory());
+    }
+}
+
+@Service
+@RequiredArgsConstructor
+public class SecurityEventPublisher {
+
+    private final KafkaTemplate<String, SecurityEvent> kafkaTemplate;
+
+    @Async
+    public void publishEvent(SecurityEventType type, Authentication auth, String details) {
+        SecurityEvent event = SecurityEvent.builder()
+            .timestamp(Instant.now())
+            .eventType(type)
+            .userId(((UserPrincipal)auth.getPrincipal()).getId())
+            .ipAddress(RequestContextHolder.currentRequestAttributes().getAttribute(
+                "clientIp", RequestAttributes.SCOPE_REQUEST))
+            .details(details)
+            .build();
+
+        kafkaTemplate.send("security-events", event);
+    }
+}
+
+@Aspect
+@Component
+public class SecurityEventAspect {
+
+    private final SecurityEventPublisher eventPublisher;
+
+    @AfterReturning(
+        pointcut = "@annotation(auditLoginSuccess)",
+        returning = "auth"
+    )
+    public void auditSuccess(Authentication auth, AuditLoginSuccess auditLoginSuccess) {
+        eventPublisher.publishEvent(
+            SecurityEventType.LOGIN_SUCCESS,
+            auth,
+            "Successful authentication"
+        );
+    }
+
+    @AfterThrowing(
+        pointcut = "execution(* org.springframework.security.authentication.AuthenticationProvider.authenticate(..))",
+        throwing = "ex"
+    )
+    public void auditFailure(AuthenticationException ex) {
+        eventPublisher.publishEvent(
+            SecurityEventType.LOGIN_FAILURE,
+            SecurityContextHolder.getContext().getAuthentication(),
+            "Failed authentication: " + ex.getMessage()
+        );
+    }
+}
+```
+
+## Distributed Session Management <a name="distributed-session-management"></a>
+
+### Redis Session Repository
+
+```java
+@Configuration
+@EnableRedisHttpSession
+public class SessionConfig {
+
+    @Bean
+    public LettuceConnectionFactory connectionFactory() {
+        return new LettuceConnectionFactory("redis", 6379);
+    }
+
+    @Bean
+    public RedisSerializer<Object> springSessionDefaultRedisSerializer() {
+        return new GenericJackson2JsonRedisSerializer();
+    }
+}
+
+@Service
+public class SessionManagementService {
+
+    private final SessionRegistry sessionRegistry;
+    private final FindByIndexNameSessionRepository<? extends Session> sessionRepository;
+
+    public void expireUserSessions(String username) {
+        sessionRegistry.getAllPrincipals().stream()
+            .filter(p -> ((User)p).getUsername().equals(username))
+            .flatMap(p -> sessionRegistry.getAllSessions(p, false).stream())
+            .map(SessionInformation::getSessionId)
+            .forEach(sessionRepository::deleteById);
+    }
+
+    public List<ActiveSession> getUserSessions(String username) {
+        return sessionRegistry.getAllPrincipals().stream()
+            .filter(p -> ((User)p).getUsername().equals(username))
+            .flatMap(p -> sessionRegistry.getAllSessions(p, false).stream())
+            .map(si -> new ActiveSession(
+                si.getSessionId(),
+                ((User)si.getPrincipal()).getUsername(),
+                si.getLastRequest(),
+                si.getSessionId().equals(sessionRegistry.getSessionInformation(
+                    RequestContextHolder.currentRequestAttributes().getSessionId()
+                ).getSessionId())
+            ))
+            .collect(Collectors.toList());
+    }
+}
+```
+
+## Secret Rotation Automation <a name="secret-rotation-automation"></a>
+
+### Vault-Integrated Secret Rotation
+
+```java
+@Configuration
+public class VaultConfig {
+
+    @Bean
+    public VaultTemplate vaultTemplate() {
+        return new VaultTemplate(new VaultEndpoint(),
+            new TokenAuthentication("your-vault-token"));
+    }
+}
+
+@Service
+@Scheduled(fixedRate = 3600000) // Rotate every hour
+public class SecretRotationService {
+
+    private final VaultTemplate vaultTemplate;
+    private final JwtKeyProvider jwtKeyProvider;
+    private final DataSource dataSource;
+
+    @ScheduledLock(lockAtLeastFor = "PT5M", lockAtMostFor = "PT10M")
+    public void rotateSecrets() {
+        rotateJwtSigningKey();
+        rotateDatabaseCredentials();
+    }
+
+    private void rotateJwtSigningKey() {
+        SecretResponse response = vaultTemplate.write(
+            "transit/keys/jwt-signing-key/rotate", null);
+
+        if (response.getStatus().is2xxSuccessful()) {
+            jwtKeyProvider.refreshKey();
+        }
+    }
+
+    private void rotateDatabaseCredentials() {
+        VaultResponse response = vaultTemplate.write(
+            "database/rotate-root/my-postgres-db", null);
+
+        if (response.getStatus().is2xxSuccessful()) {
+            String newPassword = vaultTemplate.read(
+                "database/creds/my-app-role").getData().get("password");
+            updateDataSource(newPassword);
+        }
+    }
+
+    private void updateDataSource(String newPassword) {
+        HikariDataSource hikariDS = (HikariDataSource) dataSource;
+        hikariDS.getHikariConfigMXBean().setPassword(newPassword);
+        hikariDS.getHikariPoolMXBean().softEvictConnections();
+    }
+}
+```
+
+## Security as Code <a name="security-as-code"></a>
+
+### Terraform Security Policies
+
+```hcl
+# security_groups.tf
+resource "aws_security_group" "app_sg" {
+  name        = "application-security-group"
+  description = "Security group for application servers"
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+```
+
+### Kubernetes Network Policies
+
+```yaml
+# network-policy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-server-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: api-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              role: frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              role: database
+      ports:
+        - protocol: TCP
+          port: 5432
+```
+
+## Chaos Engineering for Security <a name="chaos-engineering-for-security"></a>
+
+### Security Chaos Experiments
+
+```java
+@Service
+public class SecurityChaosService {
+
+    private final List<SecurityChaosExperiment> experiments;
+    private boolean chaosEnabled = false;
+
+    @Scheduled(fixedRate = 300000) // Every 5 minutes
+    public void runRandomExperiment() {
+        if (chaosEnabled && !experiments.isEmpty()) {
+            SecurityChaosExperiment experiment = experiments.get(
+                ThreadLocalRandom.current().nextInt(experiments.size()));
+            experiment.execute();
+        }
+    }
+
+    public void enableChaos() { this.chaosEnabled = true; }
+    public void disableChaos() { this.chaosEnabled = false; }
+}
+
+@Component
+public class TokenValidationChaos implements SecurityChaosExperiment {
+
+    private final JwtDecoder jwtDecoder;
+
+    @Override
+    public void execute() {
+        if (ThreadLocalRandom.current().nextDouble() < 0.3) { // 30% chance
+            ((NimbusJwtDecoder) jwtDecoder).setJwtValidator(
+                new DelegatingJwtValidator(
+                    Collections.singletonList(new JwtChaosValidator())
+                )
+            );
+        }
+    }
+}
+
+class JwtChaosValidator implements JwtValidator {
+    @Override
+    public Jwt validate(Jwt jwt) throws JwtValidationException {
+        if (ThreadLocalRandom.current().nextDouble() < 0.1) { // 10% chance
+            throw new JwtValidationException("Chaos engineering: random token rejection");
+        }
+        return jwt;
+    }
+}
+```
+
+## Compliance Automation <a name="compliance-automation"></a>
+
+### Automated Compliance Checks
+
+```java
+@Service
+public class ComplianceService {
+
+    private final List<ComplianceCheck> checks;
+    private final ComplianceReportRepository reportRepo;
+
+    @Scheduled(cron = "0 0 6 * * ?") // Daily at 6 AM
+    public void runComplianceScan() {
+        ComplianceReport report = new ComplianceReport();
+
+        checks.forEach(check -> {
+            ComplianceResult result = check.verify();
+            report.addResult(check.getName(), result);
+
+            if (!result.isCompliant()) {
+                triggerRemediation(check, result);
+            }
+        });
+
+        reportRepo.save(report);
+    }
+
+    private void triggerRemediation(ComplianceCheck check, ComplianceResult result) {
+        // Implement automated remediation or alerting
+    }
+}
+
+@Component
+public class PasswordPolicyComplianceCheck implements ComplianceCheck {
+
+    private final UserRepository userRepo;
+    private final PasswordEncoder passwordEncoder;
+
+    @Override
+    public ComplianceResult verify() {
+        List<User> users = userRepo.findAll();
+
+        long nonCompliant = users.stream()
+            .filter(u -> !passwordEncoder.upgradeEncoding(u.getPassword()))
+            .count();
+
+        return new ComplianceResult(
+            users.isEmpty() ? 1.0 : 1.0 - ((double)nonCompliant / users.size()),
+            nonCompliant == 0,
+            Map.of("nonCompliantUsers", nonCompliant)
+        );
+    }
+}
+```
+
+## Emerging Trends <a name="emerging-trends"></a>
+
+### Passwordless Authentication
+
+```java
+@Configuration
+public class WebAuthnConfig {
+
+    @Bean
+    public RelyingParty relyingParty() {
+        return RelyingParty.builder()
+            .identity(RelyingPartyIdentity.builder()
+                .id("example.com")
+                .name("Example Corp")
+                .build())
+            .credentialRepository(new InMemoryWebAuthnCredentialRepository())
+            .origins(Set.of("https://example.com"))
+            .build();
+    }
+
+    @Bean
+    public WebAuthnRegistrationService webAuthnRegistrationService() {
+        return new WebAuthnRegistrationService(relyingParty());
+    }
+
+    @Bean
+    public WebAuthnAuthenticationService webAuthnAuthenticationService() {
+        return new WebAuthnAuthenticationService(relyingParty());
+    }
+}
+
+@RestController
+@RequestMapping("/webauthn")
+public class WebAuthnController {
+
+    private final WebAuthnRegistrationService registrationService;
+    private final WebAuthnAuthenticationService authenticationService;
+
+    @PostMapping("/register/start")
+    public PublicKeyCredentialCreationOptions startRegistration(@AuthenticationPrincipal User user) {
+        return registrationService.startRegistration(user);
+    }
+
+    @PostMapping("/register/finish")
+    public void finishRegistration(@AuthenticationPrincipal User user,
+                                 @RequestBody RegistrationResponse response) {
+        registrationService.finishRegistration(user, response);
+    }
+
+    @PostMapping("/authenticate/start")
+    public PublicKeyCredentialRequestOptions startAuthentication(@RequestParam String username) {
+        return authenticationService.startAuthentication(username);
+    }
+
+    @PostMapping("/authenticate/finish")
+    public Authentication finishAuthentication(@RequestBody AssertionResponse response) {
+        return authenticationService.finishAuthentication(response);
+    }
+}
+```
+
+### Confidential Computing
+
+```java
+@Service
+public class EnclaveService {
+
+    private final EnclaveProvider enclaveProvider;
+
+    public byte[] processSensitiveData(byte[] input) {
+        try (EnclaveSession session = enclaveProvider.createSession()) {
+            return session.executeSecureOperation(input);
+        }
+    }
+}
+
+@Configuration
+@ConditionalOnClass(name = "org.openenclave.OEEntry")
+public class EnclaveConfig {
+
+    @Bean
+    @ConditionalOnProperty(name = "security.enclave.enabled", havingValue = "true")
+    public EnclaveProvider enclaveProvider() {
+        return new OpenEnclaveProvider("/opt/enclave/enclave.signed.so");
+    }
+}
+```
+
+This concludes our enterprise-grade Spring Security patterns. These implementations reflect current industry best practices for high-security environments, combining Spring Security with modern security architectures and operational patterns.

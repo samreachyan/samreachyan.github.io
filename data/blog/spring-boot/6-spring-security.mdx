@@ -1,0 +1,492 @@
+---
+title: '6 - Spring Security tutorial part one'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'This tutorial covers Spring Security implementation with modern practices including JWT, OAuth 2.0, role-based authorization, and Dockerized PostgreSQL.'
+authors: ['default']
+---
+
+## Table of Contents
+
+1. [Environment Setup with Docker](#environment-setup)
+2. [Project Structure](#project-structure)
+3. [Authentication Strategies](#authentication-strategies)
+4. [Authorization Rules](#authorization-rules)
+5. [OAuth 2.0 and JWT](#oauth-and-jwt)
+6. [Password Encoding](#password-encoding)
+7. [Method-Level Security](#method-level-security)
+8. [Auth Flow Implementation](#auth-flow-implementation)
+9. [Best Practices](#best-practices)
+10. [Learning Resources](#learning-resources)
+
+## Environment Setup with Docker <a name="environment-setup"></a>
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13-alpine
+    container_name: spring_postgres
+    environment:
+      POSTGRES_DB: security_demo
+      POSTGRES_USER: demo_user
+      POSTGRES_PASSWORD: demo_pass
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U demo_user']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+```
+
+## Project Structure <a name="project-structure"></a>
+
+```
+src/
+├── main/
+│   ├── java/
+│   │   └── com/example/demo/
+│   │       ├── config/
+│   │       ├── controller/
+│   │       ├── dto/
+│   │       ├── entity/
+│   │       ├── exception/
+│   │       ├── repository/
+│   │       ├── security/
+│   │       ├── service/
+│   │       └── DemoApplication.java
+│   └── resources/
+│       └── application.yml
+```
+
+## Authentication Strategies <a name="authentication-strategies"></a>
+
+Spring Security supports multiple authentication strategies:
+
+1. **Form-Based Authentication** - Traditional username/password form
+2. **JWT (JSON Web Tokens)** - Stateless token-based authentication
+3. **OAuth 2.0** - Delegated authentication
+4. **LDAP** - Enterprise directory services
+5. **SAML** - Enterprise single sign-on
+
+## Authorization Rules <a name="authorization-rules"></a>
+
+Role-based access control example:
+
+```java
+@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final JwtAuthenticationFilter jwtAuthFilter;
+    private final AuthenticationProvider authenticationProvider;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(AbstractHttpConfigurer::disable)
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/v1/user/**").hasAnyRole("USER", "ADMIN")
+                .anyRequest().authenticated()
+            )
+            .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authenticationProvider(authenticationProvider)
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+}
+```
+
+## OAuth 2.0 and JWT <a name="oauth-and-jwt"></a>
+
+### JWT Configuration
+
+```java
+@Service
+@RequiredArgsConstructor
+public class JwtService {
+
+    private static final String SECRET_KEY = "your-256-bit-secret";
+    private static final long EXPIRATION_TIME = 864_000_000; // 10 days
+
+    public String generateToken(UserDetails userDetails) {
+        return generateToken(new HashMap<>(), userDetails);
+    }
+
+    public String generateToken(
+        Map<String, Object> extraClaims,
+        UserDetails userDetails
+    ) {
+        return Jwts.builder()
+            .setClaims(extraClaims)
+            .setSubject(userDetails.getUsername())
+            .setIssuedAt(new Date(System.currentTimeMillis()))
+            .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
+            .signWith(getSignInKey(), SignatureAlgorithm.HS256)
+            .compact();
+    }
+
+    private Key getSignInKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(SECRET_KEY);
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    // Add validateToken, extractUsername, etc.
+}
+```
+
+### OAuth 2.0 Resource Server Config
+
+```java
+@Configuration
+@EnableWebSecurity
+public class OAuth2SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(auth -> auth
+                .anyRequest().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt
+                    .decoder(jwtDecoder())
+                )
+            );
+        return http.build();
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder() {
+        return NimbusJwtDecoder.withJwkSetUri("https://your-oauth-provider/.well-known/jwks.json").build();
+    }
+}
+```
+
+## Password Encoding <a name="password-encoding"></a>
+
+Always use strong password encoders:
+
+```java
+@Configuration
+public class PasswordConfig {
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(12); // Strength 12 is recommended
+    }
+}
+
+@Service
+@RequiredArgsConstructor
+public class UserService {
+
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    public User registerUser(RegistrationRequest request) {
+        var user = User.builder()
+            .email(request.getEmail())
+            .password(passwordEncoder.encode(request.getPassword()))
+            .role(Role.USER)
+            .build();
+        return userRepository.save(user);
+    }
+}
+```
+
+## Method-Level Security <a name="method-level-security"></a>
+
+```java
+@RestController
+@RequestMapping("/api/v1/admin")
+@PreAuthorize("hasRole('ADMIN')")
+public class AdminController {
+
+    @GetMapping
+    @PreAuthorize("hasAuthority('admin:read')")
+    public String getAdminData() {
+        return "Admin data";
+    }
+
+    @PostMapping
+    @PreAuthorize("hasAuthority('admin:create')")
+    public String createAdminData() {
+        return "Admin data created";
+    }
+}
+
+@Service
+public class ProductService {
+
+    @PreAuthorize("hasRole('USER') and #userId == authentication.principal.id")
+    public List<Product> getUserProducts(Long userId) {
+        // implementation
+    }
+
+    @PostAuthorize("returnObject.owner == authentication.name")
+    public Product getProduct(Long id) {
+        // implementation
+    }
+
+    @Secured({"ROLE_ADMIN", "ROLE_SUPER_ADMIN"})
+    public void deleteProduct(Long id) {
+        // implementation
+    }
+}
+```
+
+## Auth Flow Implementation <a name="auth-flow-implementation"></a>
+
+### Entity with Lombok
+
+```java
+@Entity
+@Table(name = "users")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(unique = true, nullable = false)
+    private String email;
+
+    @Column(nullable = false)
+    private String password;
+
+    @Enumerated(EnumType.STRING)
+    private Role role;
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
+    private List<Token> tokens;
+}
+
+@Entity
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Token {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(unique = true)
+    private String token;
+
+    @Enumerated(EnumType.STRING)
+    private TokenType tokenType;
+
+    private boolean expired;
+    private boolean revoked;
+
+    @ManyToOne
+    @JoinColumn(name = "user_id")
+    private User user;
+}
+
+public enum Role {
+    USER,
+    ADMIN
+}
+
+public enum TokenType {
+    BEARER
+}
+```
+
+### Auth Controller
+
+```java
+@RestController
+@RequestMapping("/api/v1/auth")
+@RequiredArgsConstructor
+public class AuthenticationController {
+
+    private final AuthenticationService authenticationService;
+
+    @PostMapping("/register")
+    public ResponseEntity<AuthenticationResponse> register(
+        @RequestBody RegisterRequest request
+    ) {
+        return ResponseEntity.ok(authenticationService.register(request));
+    }
+
+    @PostMapping("/authenticate")
+    public ResponseEntity<AuthenticationResponse> authenticate(
+        @RequestBody AuthenticationRequest request
+    ) {
+        return ResponseEntity.ok(authenticationService.authenticate(request));
+    }
+
+    @PostMapping("/refresh-token")
+    public ResponseEntity<AuthenticationResponse> refreshToken(
+        HttpServletRequest request
+    ) {
+        return ResponseEntity.ok(authenticationService.refreshToken(request));
+    }
+}
+```
+
+### Auth Service
+
+```java
+@Service
+@RequiredArgsConstructor
+public class AuthenticationService {
+
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final AuthenticationManager authenticationManager;
+    private final TokenRepository tokenRepository;
+
+    public AuthenticationResponse register(RegisterRequest request) {
+        var user = User.builder()
+            .email(request.getEmail())
+            .password(passwordEncoder.encode(request.getPassword()))
+            .role(Role.USER)
+            .build();
+
+        var savedUser = userRepository.save(user);
+        var jwtToken = jwtService.generateToken(user);
+        var refreshToken = jwtService.generateRefreshToken(user);
+        saveUserToken(savedUser, jwtToken);
+
+        return AuthenticationResponse.builder()
+            .accessToken(jwtToken)
+            .refreshToken(refreshToken)
+            .build();
+    }
+
+    public AuthenticationResponse authenticate(AuthenticationRequest request) {
+        authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(
+                request.getEmail(),
+                request.getPassword()
+            )
+        );
+
+        var user = userRepository.findByEmail(request.getEmail())
+            .orElseThrow();
+        var jwtToken = jwtService.generateToken(user);
+        var refreshToken = jwtService.generateRefreshToken(user);
+
+        revokeAllUserTokens(user);
+        saveUserToken(user, jwtToken);
+
+        return AuthenticationResponse.builder()
+            .accessToken(jwtToken)
+            .refreshToken(refreshToken)
+            .build();
+    }
+
+    private void saveUserToken(User user, String jwtToken) {
+        var token = Token.builder()
+            .user(user)
+            .token(jwtToken)
+            .tokenType(TokenType.BEARER)
+            .expired(false)
+            .revoked(false)
+            .build();
+        tokenRepository.save(token);
+    }
+
+    private void revokeAllUserTokens(User user) {
+        var validUserTokens = tokenRepository.findAllValidTokensByUser(user.getId());
+        if (validUserTokens.isEmpty())
+            return;
+
+        validUserTokens.forEach(t -> {
+            t.setExpired(true);
+            t.setRevoked(true);
+        });
+        tokenRepository.saveAll(validUserTokens);
+    }
+
+    public AuthenticationResponse refreshToken(HttpServletRequest request) {
+        final String authHeader = request.getHeader("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer "))
+            throw new AuthenticationException("Refresh token is missing");
+
+        final String refreshToken = authHeader.substring(7);
+        final String userEmail = jwtService.extractUsername(refreshToken);
+
+        if (userEmail != null) {
+            var user = userRepository.findByEmail(userEmail)
+                .orElseThrow();
+
+            if (jwtService.isTokenValid(refreshToken, user)) {
+                var accessToken = jwtService.generateToken(user);
+                revokeAllUserTokens(user);
+                saveUserToken(user, accessToken);
+
+                return AuthenticationResponse.builder()
+                    .accessToken(accessToken)
+                    .refreshToken(refreshToken)
+                    .build();
+            }
+        }
+        throw new AuthenticationException("Invalid refresh token");
+    }
+}
+```
+
+## Best Practices <a name="best-practices"></a>
+
+1. **Always use HTTPS** - Never transmit tokens or credentials over unencrypted channels
+2. **Secure JWT storage** - Use HttpOnly, Secure, SameSite cookies for web apps
+3. **Short-lived access tokens** - Typical lifetime 5-15 minutes
+4. **Refresh token rotation** - Issue new refresh token with each use
+5. **Strong password hashing** - Use BCrypt with sufficient work factor (10-12)
+6. **Principle of least privilege** - Grant minimum required permissions
+7. **Input validation** - Validate all authentication inputs
+8. **Rate limiting** - Prevent brute force attacks
+9. **Logging and monitoring** - Track authentication attempts
+10. **Regular dependency updates** - Keep security libraries current
+
+## Learning Resources <a name="learning-resources"></a>
+
+1. **Official Documentation**:
+
+   - [Spring Security Reference](https://docs.spring.io/spring-security/reference/)
+   - [OAuth 2.0 RFC](https://tools.ietf.org/html/rfc6749)
+   - [JWT RFC](https://tools.ietf.org/html/rfc7519)
+
+2. **Books**:
+
+   - "Spring Security in Action" by Laurentiu Spilca
+   - "OAuth 2 in Action" by Justin Richer, Antonio Sanso
+
+3. **Online Courses**:
+
+   - Spring Security Zero to Mastery on Udemy
+   - OAuth 2.0 and OpenID Connect by Okta on Pluralsight
+
+4. **Tutorials**:
+
+   - [Baeldung Spring Security](https://www.baeldung.com/security-spring)
+   - [Spring.io Guides](https://spring.io/guides/topicals/spring-security/)
+
+5. **Security Best Practices**:
+   - [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/)
+   - [Spring Security Best Practices](https://spring.io/blog/2022/02/21/spring-security-without-the-websecurityconfigureradapter)

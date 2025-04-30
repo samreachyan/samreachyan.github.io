@@ -1,0 +1,367 @@
+---
+title: '5 - Spring Data Access'
+date: '2025-04-30'
+tags: ['spring-boot', 'java']
+draft: false
+summary: 'This tutorial covers Spring various data access technologies with practical examples and best practices.'
+authors: ['default']
+---
+
+## Table of Contents
+
+1. [Docker Compose for PostgreSQL](#docker-compose-for-postgresql)
+2. [Spring Data JPA](#spring-data-jpa)
+3. [Hibernate Basics](#hibernate-basics)
+4. [Repository Pattern](#repository-pattern)
+5. [Query Methods](#query-methods)
+6. [Transaction Management](#transaction-management)
+7. [DTO Pattern](#dto-pattern)
+8. [Best Practices](#best-practices)
+9. [Learning Resources](#learning-resources)
+
+## Docker Compose for PostgreSQL
+
+Let's start by setting up a PostgreSQL database using Docker Compose.
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    container_name: spring_postgres
+    environment:
+      POSTGRES_USER: springuser
+      POSTGRES_PASSWORD: springpass
+      POSTGRES_DB: springdb
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+```
+
+To start the container:
+
+```bash
+docker-compose up -d
+```
+
+## Spring Data JPA
+
+Spring Data JPA simplifies data access by reducing boilerplate code. Add these dependencies to your `pom.xml`:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-jpa</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <scope>runtime</scope>
+</dependency>
+```
+
+Configure your `application.properties`:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/springdb
+spring.datasource.username=springuser
+spring.datasource.password=springpass
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+```
+
+## Hibernate Basics
+
+Hibernate is the JPA implementation used by Spring Data JPA. Here's a basic entity example:
+
+```java
+@Entity
+@Table(name = "users")
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String username;
+
+    @Column(nullable = false)
+    private String email;
+
+    // Standard getters and setters
+    // Constructors
+    // equals() and hashCode()
+}
+```
+
+Key annotations:
+
+- `@Entity`: Marks class as a JPA entity
+- `@Table`: Specifies the table name
+- `@Id`: Marks the primary key
+- `@GeneratedValue`: Configures ID generation strategy
+- `@Column`: Configures column properties
+
+## Repository Pattern
+
+Spring Data JPA provides repository interfaces to reduce boilerplate code:
+
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
+    // Basic CRUD operations are provided automatically
+}
+```
+
+Usage example in a service:
+
+```java
+@Service
+@RequiredArgsConstructor
+public class UserService {
+
+    private final UserRepository userRepository;
+
+    public User createUser(User user) {
+        return userRepository.save(user);
+    }
+
+    public Optional<User> getUserById(Long id) {
+        return userRepository.findById(id);
+    }
+
+    public List<User> getAllUsers() {
+        return userRepository.findAll();
+    }
+
+    public void deleteUser(Long id) {
+        userRepository.deleteById(id);
+    }
+}
+```
+
+## Query Methods
+
+Spring Data JPA supports several ways to define queries:
+
+### 1. Method Name Queries
+
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
+    List<User> findByUsername(String username);
+    List<User> findByEmailContaining(String emailPart);
+    List<User> findByUsernameAndEmail(String username, String email);
+}
+```
+
+### 2. @Query Annotation
+
+```java
+@Query("SELECT u FROM User u WHERE u.email LIKE %?1%")
+List<User> findByEmailLike(String emailPart);
+
+@Query(value = "SELECT * FROM users WHERE username = ?1", nativeQuery = true)
+List<User> findByUsernameNative(String username);
+```
+
+### 3. JPA Criteria API
+
+For complex dynamic queries, use Specifications:
+
+```java
+public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificationExecutor<User> {
+}
+
+// Usage
+List<User> users = userRepository.findAll(
+    (root, query, cb) -> cb.like(root.get("email"), "%gmail%")
+);
+```
+
+## Transaction Management
+
+Spring provides declarative transaction management:
+
+```java
+@Service
+@RequiredArgsConstructor
+@Transactional
+public class UserService {
+
+    private final UserRepository userRepository;
+    private final AuditLogRepository auditLogRepository;
+
+    @Transactional(rollbackFor = Exception.class)
+    public User createUserWithAudit(User user) {
+        User savedUser = userRepository.save(user);
+        auditLogRepository.save(new AuditLog("USER_CREATED", savedUser.getId()));
+        return savedUser;
+    }
+
+    @Transactional(readOnly = true)
+    public List<User> getAllActiveUsers() {
+        return userRepository.findByActiveTrue();
+    }
+}
+```
+
+Key points:
+
+- `@Transactional` on class applies to all methods
+- Can override at method level
+- `readOnly=true` optimizes read operations
+- By default, rolls back on runtime exceptions
+
+## DTO Pattern
+
+DTOs (Data Transfer Objects) help separate persistence models from API contracts:
+
+### Request/Response DTOs
+
+```java
+public class UserRequest {
+    @NotBlank
+    private String username;
+
+    @Email
+    @NotBlank
+    private String email;
+
+    // Getters and setters
+}
+
+public class UserResponse {
+    private Long id;
+    private String username;
+    private String email;
+    private Instant createdAt;
+
+    // Getters and setters
+}
+```
+
+### Using ModelMapper
+
+Add dependency:
+
+```xml
+<dependency>
+    <groupId>org.modelmapper</groupId>
+    <artifactId>modelmapper</artifactId>
+    <version>2.4.4</version>
+</dependency>
+```
+
+Configuration:
+
+```java
+@Configuration
+public class ModelMapperConfig {
+
+    @Bean
+    public ModelMapper modelMapper() {
+        ModelMapper modelMapper = new ModelMapper();
+        modelMapper.getConfiguration()
+            .setMatchingStrategy(MatchingStrategies.STRICT);
+        return modelMapper;
+    }
+}
+```
+
+Service example with DTOs:
+
+```java
+@Service
+@RequiredArgsConstructor
+public class UserService {
+
+    private final UserRepository userRepository;
+    private final ModelMapper modelMapper;
+
+    public UserResponse createUser(UserRequest userRequest) {
+        User user = modelMapper.map(userRequest, User.class);
+        User savedUser = userRepository.save(user);
+        return modelMapper.map(savedUser, UserResponse.class);
+    }
+
+    public UserResponse getUserById(Long id) {
+        User user = userRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        return modelMapper.map(user, UserResponse.class);
+    }
+}
+```
+
+## Best Practices
+
+1. **Entity Design**
+
+   - Keep entities focused on persistence concerns
+   - Avoid business logic in entities
+   - Use Lombok judiciously (`@Data` can cause issues with JPA)
+
+2. **Repository Layer**
+
+   - Keep repositories focused on data access
+   - Use custom repository interfaces for complex queries
+   - Consider query DSLs for complex dynamic queries
+
+3. **Transaction Management**
+
+   - Keep transactions short
+   - Be explicit about rollback behavior
+   - Use `readOnly=true` for read operations
+
+4. **DTO Pattern**
+
+   - Always use DTOs for API boundaries
+   - Consider using different DTOs for request vs response
+   - Use mapping libraries carefully (avoid leaking sensitive data)
+
+5. **Performance**
+
+   - Use pagination (`Pageable`) for large datasets
+   - Consider lazy loading vs eager loading
+   - Use entity graphs or `@EntityGraph` for query optimization
+
+6. **Testing**
+   - Use `@DataJpaTest` for repository tests
+   - Test transactions behavior
+   - Consider Testcontainers for integration testing
+
+## Learning Resources
+
+1. **Official Documentation**
+
+   - [Spring Data JPA Docs](https://docs.spring.io/spring-data/jpa/docs/current/reference/html/)
+   - [Hibernate ORM Docs](https://hibernate.org/orm/documentation/)
+
+2. **Books**
+
+   - "Spring Data: Modern Data Access for Enterprise Java" by Mark Pollack
+   - "Java Persistence with Hibernate" by Christian Bauer and Gavin King
+
+3. **Online Courses**
+
+   - Spring Data JPA on Udemy (by Chad Darby)
+   - Hibernate and JPA Fundamentals on Pluralsight
+
+4. **Sample Projects**
+
+   - [Spring PetClinic](https://github.com/spring-projects/spring-petclinic)
+   - [Spring Boot Samples](https://github.com/spring-projects/spring-boot/tree/main/spring-boot-project)
+
+5. **Community**
+   - Stack Overflow (spring-data-jpa tag)
+   - Spring Community Forum
+
+Remember that mastering Spring Data Access technologies requires practice. Start with simple CRUD operations, then gradually move to more complex scenarios like transactions, query optimization, and advanced mapping strategies.
