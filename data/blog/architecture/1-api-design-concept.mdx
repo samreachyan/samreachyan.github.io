@@ -1,0 +1,1020 @@
+---
+title: '1 - Core Principles of Enterprise API Design'
+date: '2026-05-08'
+tags: ['architecture', 'java']
+draft: false
+summary: 'This tutorial covers Core Concept of API Design'
+authors: ['default']
+---
+
+# Enterprise API Design Standards & Best Practices
+
+This guide provides a production-grade API architecture standard used in enterprise systems. It covers:
+
+- REST API response format
+- HTTP status code strategy
+- Error handling standards
+- Validation architecture
+- Error code systems
+- Multi-language response design
+- Pagination
+- Versioning
+- Security response patterns
+- Traceability & observability
+- API consistency rules
+- Future extensibility patterns
+
+The goal is to design APIs that are:
+
+- Consistent
+- Scalable
+- Backward compatible
+- Easy for frontend/mobile/backend teams
+- Easy for monitoring/debugging
+- Enterprise-ready
+
+## Table of Contents
+
+- [1. Core Principles of Enterprise API Design](#1-core-principles-of-enterprise-api-design)
+  - [1.1 Consistency](#11-consistency)
+  - [1.2 Predictability](#12-predictability)
+  - [1.3 Backward Compatibility](#13-backward-compatibility)
+  - [1.4 Separation of Concerns](#14-separation-of-concerns)
+- [2. Standard API Response Format](#2-standard-api-response-format)
+  - [2.1 Success Response Structure](#21-success-response-structure)
+  - [2.2 Explanation of Fields](#22-explanation-of-fields)
+  - [2.3 Minimal Success Response](#23-minimal-success-response)
+  - [2.4 Empty Response](#24-empty-response)
+- [3. HTTP Status Code Best Practices](#3-http-status-code-best-practices)
+  - [3.1 Recommended Status Codes](#31-recommended-status-codes)
+  - [3.2 Proper Usage](#32-proper-usage)
+  - [3.3 Common Enterprise Mistakes](#33-common-enterprise-mistakes)
+- [4. Enterprise Error Response Standard](#4-enterprise-error-response-standard)
+  - [4.1 Standard Error Structure](#41-standard-error-structure)
+  - [4.2 Validation Error Format](#42-validation-error-format)
+  - [4.3 Why Structured Validation Matters](#43-why-structured-validation-matters)
+- [5. Enterprise Error Code Strategy](#5-enterprise-error-code-strategy)
+  - [5.1 Why Error Codes Matter](#51-why-error-codes-matter)
+  - [5.2 Recommended Error Code Naming](#52-recommended-error-code-naming)
+  - [5.3 Recommended Format](#53-recommended-format)
+- [6. Validation Architecture Standards](#6-validation-architecture-standards)
+  - [6.1 Validation Layers](#61-validation-layers)
+  - [6.2 Validation Types](#62-validation-types)
+  - [6.3 Recommended Validation Response](#63-recommended-validation-response)
+- [7. Multi-language (i18n) API Design](#7-multi-language-i18n-api-design)
+  - [7.1 Best Practice](#71-best-practice)
+  - [7.2 Recommended Response](#72-recommended-response)
+  - [7.3 Frontend Translation Strategy](#73-frontend-translation-strategy)
+  - [7.4 Accept-Language Header](#74-accept-language-header)
+  - [7.5 Enterprise Recommendation](#75-enterprise-recommendation)
+- [8. Pagination Standards](#8-pagination-standards)
+  - [8.1 Recommended Structure](#81-recommended-structure)
+  - [8.2 Cursor Pagination (Large Systems)](#82-cursor-pagination-large-systems)
+- [9. API Versioning Strategy](#9-api-versioning-strategy)
+  - [9.1 Recommended Versioning](#91-recommended-versioning)
+  - [9.2 Why Versioning Matters](#92-why-versioning-matters)
+  - [9.3 Best Practices](#93-best-practices)
+- [10. Security Response Standards](#10-security-response-standards)
+  - [10.1 Never Leak Internal Errors](#101-never-leak-internal-errors)
+  - [10.2 Include Trace ID](#102-include-trace-id)
+  - [10.3 Rate Limit Headers](#103-rate-limit-headers)
+- [11. Enterprise Logging & Observability](#11-enterprise-logging--observability)
+  - [11.1 Correlation ID / Trace ID](#111-correlation-id--trace-id)
+  - [11.2 Why Important](#112-why-important)
+- [12. REST Naming Conventions](#12-rest-naming-conventions)
+  - [12.1 Resource Naming](#121-resource-naming)
+  - [12.2 HTTP Verb Usage](#122-http-verb-usage)
+- [13. Idempotency Standards](#13-idempotency-standards)
+  - [13.1 Why Important](#131-why-important)
+  - [13.2 Idempotency Key](#132-idempotency-key)
+- [14. Standard Headers](#14-standard-headers)
+  - [14.1 Recommended Headers](#141-recommended-headers)
+- [15. OpenAPI / Swagger Standard](#15-openapi--swagger-standard)
+  - [15.1 Always Document APIs](#151-always-document-apis)
+  - [15.2 Must Document](#152-must-document)
+- [16. Recommended Enterprise Response Examples](#16-recommended-enterprise-response-examples)
+  - [16.1 Success Example](#161-success-example)
+  - [16.2 Validation Error Example](#162-validation-error-example)
+  - [16.3 Business Error Example](#163-business-error-example)
+- [17. Enterprise API Maturity Model](#17-enterprise-api-maturity-model)
+- [18. Final Recommended Enterprise Standard](#18-final-recommended-enterprise-standard)
+- [19. Recommended Enterprise Architecture Stack](#19-recommended-enterprise-architecture-stack)
+- [20. Golden Rules](#20-golden-rules)
+- [Recommended Final Enterprise API Response Format](#recommended-final-enterprise-api-response-format)
+- [Conclusion](#conclusion)
+
+---
+
+# 1. Core Principles of Enterprise API Design
+
+## 1.1 Consistency
+
+Every API response should follow the same structure.
+
+Bad:
+
+```json
+{
+  "name": "Sam"
+}
+```
+
+Another API:
+
+```json
+{
+  "user_name": "Sam"
+}
+```
+
+Good:
+
+```json
+{
+  "success": true,
+  "data": {
+    "name": "Sam"
+  }
+}
+```
+
+## 1.2 Predictability
+
+Clients should predict responses without reading every API document.
+
+Example:
+
+- Validation errors always return `422`
+- Unauthorized always return `401`
+- Pagination always uses same metadata
+
+## 1.3 Backward Compatibility
+
+Never break existing clients.
+
+Avoid:
+
+- Renaming fields
+- Removing fields
+- Changing data type
+
+Bad:
+
+```json
+{
+  "id": 100
+}
+```
+
+Later:
+
+```json
+{
+  "id": "100"
+}
+```
+
+This breaks frontend/mobile applications.
+
+## 1.4 Separation of Concerns
+
+- HTTP Status = transport layer
+- API Error Code = business/application layer
+
+Example:
+
+```http
+HTTP 400
+```
+
+But inside:
+
+```json
+{
+  "error_code": "VALIDATION_ERROR"
+}
+```
+
+# 2. Standard API Response Format
+
+## 2.1 Success Response Structure
+
+Recommended enterprise structure:
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "Request successful",
+  "data": {},
+  "meta": {},
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "f8b7b1d2-88f9-4cb4-b55e-a3c76c1d0a88"
+}
+```
+
+## 2.2 Explanation of Fields
+
+| Field     | Purpose                    |
+| --------- | -------------------------- |
+| success   | Indicates success/failure  |
+| code      | Internal business code     |
+| message   | Human readable             |
+| data      | Actual payload             |
+| meta      | Pagination/filter metadata |
+| timestamp | Server response time       |
+| trace_id  | Request tracing/debugging  |
+
+## 2.3 Minimal Success Response
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "User fetched successfully",
+  "data": {
+    "id": 1,
+    "name": "Samreach"
+  }
+}
+```
+
+## 2.4 Empty Response
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "No data found",
+  "data": []
+}
+```
+
+Never return:
+
+```json
+null
+```
+
+or
+
+```json
+{}
+```
+
+without consistency.
+
+# 3. HTTP Status Code Best Practices
+
+## 3.1 Recommended Status Codes
+
+| HTTP Code | Meaning               | Usage                          |
+| --------- | --------------------- | ------------------------------ |
+| 200       | OK                    | Successful GET/PUT/PATCH       |
+| 201       | Created               | Resource created               |
+| 202       | Accepted              | Async processing               |
+| 204       | No Content            | Delete success                 |
+| 400       | Bad Request           | Invalid request                |
+| 401       | Unauthorized          | Authentication required        |
+| 403       | Forbidden             | No permission                  |
+| 404       | Not Found             | Resource missing               |
+| 409       | Conflict              | Duplicate/conflict             |
+| 422       | Validation Error      | Field validation               |
+| 429       | Too Many Requests     | Rate limit                     |
+| 500       | Internal Server Error | Unexpected server issue        |
+| 503       | Service Unavailable   | Maintenance/downstream failure |
+
+## 3.2 Proper Usage
+
+### Create User
+
+```http
+POST /users
+```
+
+Response:
+
+```http
+201 Created
+```
+
+### Validation Error
+
+```http
+422 Unprocessable Entity
+```
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {
+    "email": ["Email is required"]
+  }
+}
+```
+
+### Unauthorized
+
+```http
+401 Unauthorized
+```
+
+```json
+{
+  "success": false,
+  "code": "UNAUTHORIZED",
+  "message": "Authentication required"
+}
+```
+
+## 3.3 Common Enterprise Mistakes
+
+### Mistake 1: Always Return 200
+
+Bad:
+
+```http
+200 OK
+```
+
+```json
+{
+  "success": false
+}
+```
+
+Why bad:
+
+- Monitoring tools fail
+- API gateways fail
+- Client retry logic fails
+
+### Mistake 2: Using 500 for Business Errors
+
+Bad:
+
+```http
+500 Internal Server Error
+```
+
+When email already exists.
+
+Correct:
+
+```http
+409 Conflict
+```
+
+# 4. Enterprise Error Response Standard
+
+## 4.1 Standard Error Structure
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {},
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "4e2fbc91-1a82-4c7e-b5f0-cf15cb53d912"
+}
+```
+
+## 4.2 Validation Error Format
+
+Recommended format:
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {
+    "email": [
+      {
+        "code": "REQUIRED",
+        "message": "Email is required"
+      }
+    ],
+    "password": [
+      {
+        "code": "MIN_LENGTH",
+        "message": "Password must be at least 8 characters"
+      }
+    ]
+  }
+}
+```
+
+## 4.3 Why Structured Validation Matters
+
+Frontend/mobile can:
+
+- Translate messages
+- Highlight fields
+- Handle codes programmatically
+
+Example:
+
+```javascript
+if (error.code === 'MIN_LENGTH') {
+  showPasswordRule()
+}
+```
+
+# 5. Enterprise Error Code Strategy
+
+## 5.1 Why Error Codes Matter
+
+Messages can change.
+
+Codes should never change.
+
+## 5.2 Recommended Error Code Naming
+
+### General
+
+| Code               | Meaning           |
+| ------------------ | ----------------- |
+| SUCCESS            | Success           |
+| VALIDATION_ERROR   | Validation failed |
+| INTERNAL_ERROR     | Unexpected error  |
+| RESOURCE_NOT_FOUND | Entity not found  |
+| UNAUTHORIZED       | Login required    |
+| FORBIDDEN          | Permission denied |
+
+### Authentication
+
+| Code                |
+| ------------------- |
+| INVALID_CREDENTIALS |
+| TOKEN_EXPIRED       |
+| TOKEN_INVALID       |
+| ACCOUNT_LOCKED      |
+
+### Business Errors
+
+| Code                    |
+| ----------------------- |
+| EMAIL_ALREADY_EXISTS    |
+| INSUFFICIENT_BALANCE    |
+| ORDER_ALREADY_CANCELLED |
+
+## 5.3 Recommended Format
+
+```json
+{
+  "code": "EMAIL_ALREADY_EXISTS"
+}
+```
+
+Avoid:
+
+```json
+{
+  "code": 1004
+}
+```
+
+String codes are:
+
+- Readable
+- Easier debugging
+- Better logs
+- Easier frontend handling
+
+# 6. Validation Architecture Standards
+
+## 6.1 Validation Layers
+
+Enterprise systems should validate at multiple layers:
+
+| Layer         | Responsibility        |
+| ------------- | --------------------- |
+| API Gateway   | Rate limit/basic auth |
+| Controller    | Request structure     |
+| Service Layer | Business rules        |
+| Database      | Constraints           |
+
+## 6.2 Validation Types
+
+### Required
+
+```json
+{
+  "email": "required"
+}
+```
+
+### Format
+
+```json
+{
+  "email": "must be valid email"
+}
+```
+
+### Range
+
+```json
+{
+  "age": "must be between 18 and 60"
+}
+```
+
+### Business Validation
+
+Example:
+
+- Cannot cancel shipped order
+- Balance cannot go negative
+
+These belong in service/business layer.
+
+## 6.3 Recommended Validation Response
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {
+    "email": [
+      {
+        "code": "INVALID_EMAIL_FORMAT",
+        "message": "Email format is invalid"
+      }
+    ]
+  }
+}
+```
+
+# 7. Multi-language (i18n) API Design
+
+## 7.1 Best Practice
+
+Never hardcode business text only in backend.
+
+Use:
+
+- Message code
+- Translation system
+
+## 7.2 Recommended Response
+
+```json
+{
+  "success": false,
+  "code": "EMAIL_ALREADY_EXISTS",
+  "message": "Email already exists",
+  "message_key": "error.email_exists"
+}
+```
+
+## 7.3 Frontend Translation Strategy
+
+Frontend translates using:
+
+```json
+{
+  "error.email_exists": {
+    "en": "Email already exists",
+    "km": "អ៊ីមែលនេះមានរួចហើយ"
+  }
+}
+```
+
+## 7.4 Accept-Language Header
+
+Example:
+
+```http
+Accept-Language: en-US
+```
+
+or
+
+```http
+Accept-Language: km-KH
+```
+
+Backend can localize automatically.
+
+## 7.5 Enterprise Recommendation
+
+Recommended:
+
+- Backend returns stable code
+- Frontend handles translation
+
+Best for:
+
+- Mobile apps
+- Multi-platform systems
+- Enterprise localization
+
+# 8. Pagination Standards
+
+## 8.1 Recommended Structure
+
+```json
+{
+  "success": true,
+  "data": [],
+  "meta": {
+    "page": 1,
+    "per_page": 20,
+    "total": 500,
+    "total_pages": 25,
+    "has_next": true,
+    "has_previous": false
+  }
+}
+```
+
+## 8.2 Cursor Pagination (Large Systems)
+
+Recommended for:
+
+- High-scale systems
+- Social feeds
+- Real-time systems
+
+Example:
+
+```json
+{
+  "data": [],
+  "meta": {
+    "next_cursor": "eyJpZCI6MTAwfQ=="
+  }
+}
+```
+
+# 9. API Versioning Strategy
+
+## 9.1 Recommended Versioning
+
+```http
+/api/v1/users
+```
+
+## 9.2 Why Versioning Matters
+
+Allows:
+
+- Backward compatibility
+- Gradual migration
+- Safe refactoring
+
+## 9.3 Best Practices
+
+Never:
+
+- Remove fields in same version
+- Change field types
+
+Instead:
+
+- Add new fields
+- Deprecate old fields
+
+# 10. Security Response Standards
+
+## 10.1 Never Leak Internal Errors
+
+Bad:
+
+```json
+{
+  "message": "SQLSTATE[23000]: Integrity constraint violation"
+}
+```
+
+Good:
+
+```json
+{
+  "code": "INTERNAL_ERROR",
+  "message": "Unexpected server error"
+}
+```
+
+## 10.2 Include Trace ID
+
+```json
+{
+  "trace_id": "req-12345"
+}
+```
+
+Helps:
+
+- Logging
+- Monitoring
+- Debugging
+- Distributed tracing
+
+## 10.3 Rate Limit Headers
+
+Recommended:
+
+```http
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 20
+X-RateLimit-Reset: 1715239200
+```
+
+# 11. Enterprise Logging & Observability
+
+## 11.1 Correlation ID / Trace ID
+
+Every request should contain:
+
+```http
+X-Request-Id
+```
+
+or
+
+```http
+X-Correlation-Id
+```
+
+## 11.2 Why Important
+
+Microservices need traceability across:
+
+- API gateway
+- Auth service
+- Payment service
+- Notification service
+
+# 12. REST Naming Conventions
+
+## 12.1 Resource Naming
+
+Good:
+
+```http
+/users
+/orders
+/order-items
+```
+
+Bad:
+
+```http
+/getUsers
+/createOrder
+```
+
+## 12.2 HTTP Verb Usage
+
+| Method | Usage          |
+| ------ | -------------- |
+| GET    | Read           |
+| POST   | Create         |
+| PUT    | Replace        |
+| PATCH  | Partial update |
+| DELETE | Remove         |
+
+# 13. Idempotency Standards
+
+## 13.1 Why Important
+
+Prevent duplicate operations.
+
+Example:
+
+- Payment retry
+- Order retry
+
+## 13.2 Idempotency Key
+
+```http
+Idempotency-Key: abc-123
+```
+
+# 14. Standard Headers
+
+## 14.1 Recommended Headers
+
+| Header          | Purpose      |
+| --------------- | ------------ |
+| Authorization   | JWT/API key  |
+| Accept-Language | Localization |
+| X-Request-Id    | Traceability |
+| Idempotency-Key | Retry safety |
+| Content-Type    | MIME type    |
+
+# 15. OpenAPI / Swagger Standard
+
+## 15.1 Always Document APIs
+
+Use:
+
+- OpenAPI 3
+- Swagger UI
+
+## 15.2 Must Document
+
+- Request schema
+- Response schema
+- Error responses
+- Validation rules
+- Authentication
+- Examples
+
+# 16. Recommended Enterprise Response Examples
+
+## 16.1 Success Example
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "User created successfully",
+  "data": {
+    "id": 1001,
+    "name": "Samreach"
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "abc-123"
+}
+```
+
+## 16.2 Validation Error Example
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {
+    "email": [
+      {
+        "code": "REQUIRED",
+        "message": "Email is required"
+      }
+    ]
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "abc-123"
+}
+```
+
+## 16.3 Business Error Example
+
+```json
+{
+  "success": false,
+  "code": "INSUFFICIENT_BALANCE",
+  "message": "Account balance is insufficient",
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "abc-123"
+}
+```
+
+# 17. Enterprise API Maturity Model
+
+## Level 1 — Basic
+
+- Inconsistent responses
+- Poor error handling
+
+## Level 2 — Standardized
+
+- Common response format
+- Proper HTTP codes
+
+## Level 3 — Enterprise
+
+- Traceability
+- Versioning
+- Localization
+- Monitoring
+- API governance
+
+## Level 4 — Platform Engineering
+
+- API gateway
+- Distributed tracing
+- Contract testing
+- Schema registry
+- Zero downtime deployment
+
+# 18. Final Recommended Enterprise Standard
+
+## Recommended Response Template
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "Operation successful",
+  "data": {},
+  "errors": null,
+  "meta": {},
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "uuid"
+}
+```
+
+# 19. Recommended Enterprise Architecture Stack
+
+| Concern          | Recommendation        |
+| ---------------- | --------------------- |
+| API Spec         | OpenAPI 3             |
+| Auth             | OAuth2/JWT            |
+| Gateway          | Kong / Apigee / NGINX |
+| Tracing          | OpenTelemetry         |
+| Logs             | ELK Stack             |
+| Metrics          | Prometheus + Grafana  |
+| Validation       | JSON Schema           |
+| Contract Testing | Pact                  |
+| Rate Limit       | API Gateway           |
+
+# 20. Golden Rules
+
+## Always
+
+- ✅ Use proper HTTP status codes
+- ✅ Return consistent response structure
+- ✅ Use stable error codes
+- ✅ Include trace_id
+- ✅ Support localization
+- ✅ Use API versioning
+- ✅ Separate business errors from server errors
+- ✅ Keep backward compatibility
+
+## Never
+
+- ❌ Always return HTTP 200
+- ❌ Leak SQL/internal exceptions
+- ❌ Break response contracts
+- ❌ Use inconsistent naming
+- ❌ Return random validation formats
+- ❌ Mix transport errors with business errors
+
+# Recommended Final Enterprise API Response Format
+
+## Success
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "Request successful",
+  "data": {},
+  "meta": {},
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "uuid"
+}
+```
+
+## Error
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {
+    "field": [
+      {
+        "code": "REQUIRED",
+        "message": "Field is required"
+      }
+    ]
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "uuid"
+}
+```
+
+# Conclusion
+
+A good enterprise API standard is not just about JSON format.
+
+It is about:
+
+- Scalability
+- Stability
+- Developer experience
+- Monitoring
+- Security
+- Future compatibility
+- Cross-team consistency
+
+The best APIs are:
+
+- Predictable
+- Observable
+- Backward compatible
+- Self-documenting
+- Easy to integrate
+
+That is the foundation of enterprise-grade backend architecture.
