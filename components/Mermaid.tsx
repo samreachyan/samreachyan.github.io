@@ -7,11 +7,11 @@ type MermaidProps = {
 }
 
 type PanZoomInstance = {
-  dispose?: () => void
-  zoomIn?: () => void
-  zoomOut?: () => void
-  moveTo?: (x: number, y: number) => void
-  zoomAbs?: (x: number, y: number, scale: number) => void
+  dispose: () => void
+  zoomTo: (clientX: number, clientY: number, scaleMultiplier: number) => void
+  zoomAbs: (clientX: number, clientY: number, zoomLevel: number) => void
+  moveTo: (x: number, y: number) => void
+  getTransform: () => { x: number; y: number; scale: number }
 }
 
 export default function Mermaid({ chart }: MermaidProps) {
@@ -100,14 +100,30 @@ export default function Mermaid({ chart }: MermaidProps) {
         <button
           type="button"
           className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
-          onClick={() => panzoomRef.current?.zoomIn?.()}
+          onClick={() => {
+            const svg = containerRef.current?.querySelector('svg')
+            if (svg && panzoomRef.current) {
+              const rect = svg.getBoundingClientRect()
+              const cx = rect.left + rect.width / 2
+              const cy = rect.top + rect.height / 2
+              panzoomRef.current.zoomTo(cx, cy, 1.25)
+            }
+          }}
         >
           +
         </button>
         <button
           type="button"
           className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
-          onClick={() => panzoomRef.current?.zoomOut?.()}
+          onClick={() => {
+            const svg = containerRef.current?.querySelector('svg')
+            if (svg && panzoomRef.current) {
+              const rect = svg.getBoundingClientRect()
+              const cx = rect.left + rect.width / 2
+              const cy = rect.top + rect.height / 2
+              panzoomRef.current.zoomTo(cx, cy, 0.8)
+            }
+          }}
         >
           -
         </button>
@@ -115,8 +131,10 @@ export default function Mermaid({ chart }: MermaidProps) {
           type="button"
           className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
           onClick={() => {
-            panzoomRef.current?.moveTo?.(0, 0)
-            panzoomRef.current?.zoomAbs?.(0, 0, 1)
+            if (panzoomRef.current) {
+              panzoomRef.current.moveTo(0, 0)
+              panzoomRef.current.zoomAbs(0, 0, 1)
+            }
           }}
         >
           Reset
