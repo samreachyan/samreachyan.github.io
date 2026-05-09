@@ -1,5 +1,5 @@
 {
-  "architecture": 1,
-  "java": 14,
+  "architecture": 2,
+  "java": 15,
   "spring-boot": 13
 }
