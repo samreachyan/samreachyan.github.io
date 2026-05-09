@@ -1,13 +1,11 @@
 ---
 title: '3 - Spring Boot API Design Template (Enterprise Grade)'
-date: '2026-05-09'
+date: '2026-05-10'
 tags: ['architecture', 'java', 'spring-boot']
 draft: false
 summary: 'Production-grade Spring Boot API implementation following enterprise design standards with JDK 21, i18n, cursor pagination, and exception handling'
 authors: ['default']
 ---
-
-import Mermaid from '@/components/Mermaid'
 
 # Spring Boot API Design Template — Enterprise Implementation
 
@@ -72,8 +70,6 @@ This guide provides a **production-ready Spring Boot implementation** that follo
   - [12.1 cURL Examples](#121-curl-examples)
   - [12.2 Response Demonstrations](#122-response-demonstrations)
 - [13. Conclusion](#13-conclusion)
-
----
 
 ## 1. Project Setup & Dependencies
 
@@ -235,8 +231,6 @@ springdoc:
     operations-sorter: method
 ```
 
----
-
 ## 2. Project Package Structure
 
 ```
@@ -281,8 +275,6 @@ com.enterprise.api/
 └── advice/
     └── GlobalExceptionHandler.java     # Global exception handler
 ```
-
----
 
 ## 3. Standard API Response Wrapper
 
@@ -542,8 +534,6 @@ public class ApiResponseBuilder<T> {
 }
 ```
 
----
-
 ## 4. Enterprise Error Code System
 
 ### 4.1 ErrorCode Enum
@@ -705,8 +695,6 @@ public final class InvalidStateTransitionException extends BusinessException {
     }
 }
 ```
-
----
 
 ## 5. Multi-Language (i18n) Support
 
@@ -916,8 +904,6 @@ public class MessageService {
     }
 }
 ```
-
----
 
 ## 6. Global Exception Handling
 
@@ -1146,8 +1132,6 @@ public class GlobalExceptionHandler {
 | `AccessDeniedException`                   | 403 Forbidden             | `FORBIDDEN`                |
 | `HttpMessageNotReadableException`         | 400 Bad Request           | `VALIDATION_ERROR`         |
 | `Exception` (unhandled)                   | 500 Internal Server Error | `INTERNAL_ERROR`           |
-
----
 
 ## 7. Cursor-Based Pagination
 
@@ -1545,8 +1529,6 @@ public ResponseEntity<ApiResponse<CursorPage<UserResponse>>> getUsers(
 }
 ```
 
----
-
 ## 8. Validation Architecture
 
 ### 8.1 DTO with Jakarta Validation
@@ -1697,8 +1679,6 @@ public ResponseEntity<ApiResponse<UserResponse>> updateUser(
 ) { ... }
 ```
 
----
-
 ## 9. Traceability — Trace ID / Correlation ID
 
 ### 9.1 TraceIdFilter — Generate & Propagate
@@ -1820,8 +1800,6 @@ This produces logs like:
 ```
 2026-05-09 10:00:00 [http-nio-8080-exec-1] [f8b7b1d2-88f9-4cb4-b55e-a3c76c1d0a88] INFO  c.e.api.user.service.UserService - User fetched successfully
 ```
-
----
 
 ## 10. Complete Controller Example
 
@@ -2090,5 +2068,438 @@ public record UserResponse(
                 user.getName(),
                 user.getEmail(),
                 user.getAge(),
-                user
+                user.getCreatedAt()
+        );
+    }
+}
 ```
+
+## 11. OpenAPI / Swagger Configuration
+
+```java
+package com.enterprise.api.config;
+
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.info.Contact;
+import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.media.Content;
+import io.swagger.v3.oas.models.media.MediaType;
+import io.swagger.v3.oas.models.media.Schema;
+import io.swagger.v3.oas.models.responses.ApiResponses;
+import io.swagger.v3.oas.models.servers.Server;
+import org.springdoc.core.customizers.OpenApiCustomizer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+
+@Configuration
+public class OpenApiConfig {
+
+    @Bean
+    public OpenAPI customOpenAPI() {
+        return new OpenAPI()
+                .info(new Info()
+                        .title("Enterprise API Template")
+                        .version("1.0.0")
+                        .description("""
+                                Production-grade REST API following enterprise design standards.
+
+                                ## Standards
+                                - Consistent response format with `success`, `code`, `message`, `data`, `meta`, `timestamp`, `trace_id`
+                                - Proper HTTP status codes (200, 201, 400, 404, 409, 422, 500)
+                                - Structured validation errors with machine-readable codes
+                                - Cursor-based pagination for high-scale data
+                                - Multi-language support via Accept-Language header
+                                - Trace ID for distributed debugging
+                                """)
+                        .contact(new Contact()
+                                .name("API Support")
+                                .email("api@enterprise.com"))
+                        .license(new License()
+                                .name("Enterprise License")
+                                .url("https://enterprise.com/license")))
+                .addServersItem(new Server()
+                        .url("http://localhost:8080")
+                        .description("Local Development"))
+                .addServersItem(new Server()
+                        .url("https://api.enterprise.com/v1")
+                        .description("Production"));
+    }
+
+    /**
+     * Add global response schemas for all endpoints.
+     */
+    @Bean
+    public OpenApiCustomizer globalResponseCustomizer() {
+        return openApi -> openApi.getPaths().values().forEach(pathItem ->
+                pathItem.readOperations().forEach(operation -> {
+                    ApiResponses responses = operation.getResponses();
+                    if (responses == null) return;
+
+                    // Add 500 Internal Server Error to all operations
+                    responses.addApiResponse("500", new io.swagger.v3.oas.models.responses.ApiResponse()
+                            .description("Internal Server Error")
+                            .content(new Content()
+                                    .addMediaType("application/json",
+                                            new MediaType().schema(new Schema<>()
+                                                    .$ref("#/components/schemas/ApiError")))));
+
+                    // Add 400 Bad Request to POST/PUT/PATCH
+                    var method = operation.getOperationId();
+                    if (method != null && (method.contains("create") || method.contains("update"))) {
+                        responses.addApiResponse("422", new io.swagger.v3.oas.models.responses.ApiResponse()
+                                .description("Validation Error")
+                                .content(new Content()
+                                        .addMediaType("application/json",
+                                                new MediaType().schema(new Schema<>()
+                                                        .$ref("#/components/schemas/ApiError")))));
+                    }
+                })
+        );
+    }
+}
+```
+
+## 12. Testing the API
+
+### 12.1 cURL Examples
+
+#### Create a User (Success)
+
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -H "Accept-Language: en" \
+  -d '{
+    "name": "Samreach Yan",
+    "email": "samreach@example.com",
+    "age": 25
+  }'
+```
+
+**Response (HTTP 201):**
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "User created successfully",
+  "data": {
+    "id": 1,
+    "name": "Samreach Yan",
+    "email": "samreach@example.com",
+    "age": 25,
+    "createdAt": "2026-05-09T10:00:00Z"
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "f8b7b1d2-88f9-4cb4-b55e-a3c76c1d0a88"
+}
+```
+
+#### Create a User (Validation Error)
+
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -H "Accept-Language: en" \
+  -d '{
+    "name": "",
+    "email": "invalid-email",
+    "age": 15
+  }'
+```
+
+**Response (HTTP 422):**
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {
+    "name": [
+      {
+        "code": "REQUIRED",
+        "message": "Name is required"
+      }
+    ],
+    "email": [
+      {
+        "code": "INVALID_EMAIL_FORMAT",
+        "message": "Email format is invalid"
+      }
+    ],
+    "age": [
+      {
+        "code": "OUT_OF_RANGE",
+        "message": "Age must be between 18 and 120"
+      }
+    ]
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "4e2fbc91-1a82-4c7e-b5f0-cf15cb53d912"
+}
+```
+
+#### Create a User (Duplicate Email)
+
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -H "Accept-Language: en" \
+  -d '{
+    "name": "Another User",
+    "email": "samreach@example.com",
+    "age": 30
+  }'
+```
+
+**Response (HTTP 409):**
+
+```json
+{
+  "success": false,
+  "code": "DUPLICATE_RESOURCE",
+  "message": "User already exists with email: samreach@example.com",
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "7a3b2c91-1a82-4c7e-b5f0-cf15cb53d912"
+}
+```
+
+#### Get Users with Cursor Pagination
+
+```bash
+# First page
+curl "http://localhost:8080/api/v1/users?limit=20" \
+  -H "Accept-Language: en"
+
+# Next page (use the next_cursor from previous response)
+curl "http://localhost:8080/api/v1/users?cursor=eyJpZCI6MjB9&limit=20" \
+  -H "Accept-Language: en"
+```
+
+**Response (HTTP 200):**
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "Users fetched successfully",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "name": "Samreach Yan",
+        "email": "samreach@example.com",
+        "age": 25,
+        "createdAt": "2026-05-09T10:00:00Z"
+      }
+    ],
+    "next_cursor": "eyJpZCI6MX0=",
+    "has_next": true,
+    "total": 1050,
+    "page_size": 20
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "b8c7d1e2-88f9-4cb4-b55e-a3c76c1d0a88"
+}
+```
+
+#### Get User Not Found
+
+```bash
+curl http://localhost:8080/api/v1/users/9999 \
+  -H "Accept-Language: en"
+```
+
+**Response (HTTP 404):**
+
+```json
+{
+  "success": false,
+  "code": "RESOURCE_NOT_FOUND",
+  "message": "User not found with identifier: 9999",
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "d9e8f7a6-5b4c-3d2e-1f0a-bbccddeeff00"
+}
+```
+
+### 12.2 Multi-Language Response Demonstration
+
+#### Request with Khmer (Cambodian) Language
+
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -H "Accept-Language: km-KH" \
+  -d '{
+    "name": "",
+    "email": "invalid",
+    "age": 15
+  }'
+```
+
+**Response (HTTP 422) — Khmer:**
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "សុពលភាពបរាជ័យ",
+  "errors": {
+    "name": [
+      {
+        "code": "REQUIRED",
+        "message": "ឈ្មោះត្រូវបានទាមទារ"
+      }
+    ],
+    "email": [
+      {
+        "code": "INVALID_EMAIL_FORMAT",
+        "message": "ទម្រង់អ៊ីមែលមិនត្រឹមត្រូវ"
+      }
+    ],
+    "age": [
+      {
+        "code": "OUT_OF_RANGE",
+        "message": "អាយុត្រូវតែស្ថិតនៅចន្លោះ 18 និង 120"
+      }
+    ]
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "4e2fbc91-1a82-4c7e-b5f0-cf15cb53d912"
+}
+```
+
+#### Request with Korean Language
+
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -H "Accept-Language: ko-KR" \
+  -d '{
+    "name": "",
+    "email": "invalid",
+    "age": 15
+  }'
+```
+
+**Response (HTTP 422) — Korean (fallback to English if not configured):**
+
+```json
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": {
+    "name": [
+      {
+        "code": "REQUIRED",
+        "message": "Name is required"
+      }
+    ]
+  },
+  "timestamp": "2026-05-09T10:00:00Z",
+  "trace_id": "4e2fbc91-1a82-4c7e-b5f0-cf15cb53d912"
+}
+```
+
+### 12.3 Access Swagger UI
+
+Once the application is running, access:
+
+- **Swagger UI:** http://localhost:8080/swagger-ui.html
+- **OpenAPI Spec:** http://localhost:8080/api-docs
+
+## 13. Conclusion
+
+This guide provides a **production-ready Spring Boot API template** that implements all the enterprise design standards from the [Core Principles of Enterprise API Design](/blog/architecture/1-api-design-concept).
+
+### What We've Built
+
+| Concern                      | Implementation                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Standard Response Format** | `ApiResponse<T>` record with `success`, `code`, `message`, `data`, `meta`, `timestamp`, `trace_id` |
+| **Error Handling**           | `GlobalExceptionHandler` with proper HTTP status codes (400, 404, 409, 422, 500)                   |
+| **Error Codes**              | `ErrorCode` enum with stable, machine-readable string codes                                        |
+| **Validation**               | Jakarta Validation with structured field-level errors (HTTP 422)                                   |
+| **i18n**                     | `Accept-Language` header with `MessageSource` for English, Khmer, Korean, Chinese                  |
+| **Pagination**               | Cursor-based pagination with base64-encoded cursors                                                |
+| **Exception Hierarchy**      | Sealed `BusinessException` with permitted subclasses (JDK 21)                                      |
+| **Traceability**             | `TraceIdFilter` with MDC logging and `X-Request-Id` header                                         |
+| **API Docs**                 | OpenAPI 3 / Swagger UI with `springdoc-openapi`                                                    |
+| **JDK 21**                   | Records, Sealed Classes, Virtual Threads, Text Blocks                                              |
+
+### Key Design Decisions
+
+1. **Records over Lombok** — Immutable DTOs with built-in `equals()`, `hashCode()`, `toString()`
+2. **Sealed Classes for Exceptions** — Controlled hierarchy prevents misuse
+3. **Cursor over Offset Pagination** — Stable, fast, consistent for high-scale systems
+4. **Backend i18n** — Messages localized on the server side based on `Accept-Language`
+5. **Trace ID in Every Response** — Every response includes `trace_id` for debugging
+6. **Never Leak Internals** — HTTP 500 always returns generic message, logs full stack trace server-side
+
+### Next Steps
+
+To extend this template for your enterprise:
+
+1. **Add Authentication** — Integrate Spring Security with JWT
+2. **Add Rate Limiting** — Use bucket4j or API Gateway
+3. **Add Distributed Tracing** — Integrate OpenTelemetry with Jaeger/Zipkin
+4. **Add Contract Testing** — Use Spring Cloud Contract or Pact
+5. **Add API Gateway** — Deploy behind Kong, Apigee, or Spring Cloud Gateway
+6. **Add Health Checks** — Spring Boot Actuator with `/health`, `/metrics`
+7. **Add Caching** — Spring Cache with Redis for frequently accessed data
+
+### Final Architecture Diagram
+
+```mermaid
+graph TB
+    Client[Client / Mobile / Frontend]
+    Gateway[API Gateway]
+
+    subgraph "Spring Boot API"
+        Filter[TraceIdFilter]
+        Controller[UserController]
+        Service[UserService]
+        Repository[UserRepository]
+        DB[(PostgreSQL)]
+
+        Filter --> Controller
+        Controller --> Service
+        Service --> Repository
+        Repository --> DB
+    end
+
+    subgraph "Cross-Cutting Concerns"
+        Handler[GlobalExceptionHandler]
+        i18n[MessageService / i18n]
+        Swagger[OpenAPI / Swagger]
+    end
+
+    Client -->|"Accept-Language: km-KH"| Gateway
+    Gateway --> Filter
+    Controller --- Handler
+    Controller --- i18n
+    Controller --- Swagger
+
+    style Client fill:#e1f5fe
+    style Gateway fill:#fff3e0
+    style DB fill:#f3e5f5
+```
+
+### Golden Rules Recap
+
+| ✅ Always                            | ❌ Never                                  |
+| ------------------------------------ | ----------------------------------------- |
+| Use proper HTTP status codes         | Return HTTP 200 for errors                |
+| Return consistent response structure | Leak SQL/internal exceptions              |
+| Use stable error codes               | Break response contracts                  |
+| Include `trace_id`                   | Use inconsistent naming                   |
+| Support localization                 | Return random validation formats          |
+| Use API versioning (`/api/v1/`)      | Mix transport errors with business errors |
+| Keep backward compatibility          | Remove fields without deprecation         |
+
+_This guide is part of the Enterprise API Design series. See [Core Principles of Enterprise API Design](/blog/architecture/1-api-design-concept) for the conceptual foundation._
